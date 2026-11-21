@@ -1,10 +1,9 @@
 """
 Klient API ULDK (Usługa Lokalizacji Działek Katastralnych) GUGiK z cachowaniem (cachetools).
-Pobiera granice działki po identyfikatorze TERYT (np. 141201_1.0001.123/4).
+Pobiera granice działki po identyfikatorze TERYT (np. 141201_1.0001.123/4) lub współrzędnych geograficznych.
 Zwraca geometrię GeoJSON w WGS84 (EPSG:4326), punkt centralny (representative_point) oraz pole w ha.
 """
 
-import re
 import math
 from typing import Dict, Any, Optional, Tuple, List
 import httpx
@@ -18,6 +17,16 @@ from app.services.gis.coordinates import transform_2180_to_4326, transform_coord
 
 # Inicjalizacja cache dla działek: max 500 elementów (bezpieczne dla 4GB RAM VPS), TTL 24 godziny
 parcel_cache = TTLCache(maxsize=500, ttl=86400)
+
+class ParcelNotFoundError(Exception):
+    """Wyjątek rzucany, gdy ULDK nie odnajdzie działki w podanym punkcie."""
+    pass
+
+
+class UldkServiceError(Exception):
+    """Wyjątek rzucany w przypadku błędu połączenia lub niedostępności usługi ULDK GUGiK."""
+    pass
+
 
 def parse_teryt_components(teryt: str) -> Dict[str, str]:
     """
@@ -89,17 +98,36 @@ def extract_wkt_from_response(raw_text: str) -> Optional[str]:
             return line
     return None
 
+def parse_wkt_2180_geometry(raw_wkt: str) -> Tuple[float, PointCoordinates, ParcelGeometry]:
+    """
+    Przetwarza geometrię WKT (EPSG:2180) na (area_ha, PointCoordinates, ParcelGeometry).
+    """
+    clean_wkt = raw_wkt.split(";")[-1].strip() if ";" in raw_wkt else raw_wkt.strip()
+    poly = wkt.loads(clean_wkt)
+    area_ha = round(poly.area / 10000.0, 2)
+    if area_ha < 0.01:
+        area_ha = 1.0
+
+    # Używamy representative_point zamiast centroidu (wymóg KOWR dla działek o nieregularnym kształcie)
+    rep_point = poly.representative_point()
+    center_lon, center_lat = transform_2180_to_4326(rep_point.x, rep_point.y)
+    raw_geojson = mapping(poly)
+    transformed_coords = transform_coordinates_list(raw_geojson["coordinates"])
+
+    center = PointCoordinates(lat=round(center_lat, 6), lon=round(center_lon, 6))
+    geometry = ParcelGeometry(type=raw_geojson["type"], coordinates=transformed_coords)
+    return area_ha, center, geometry
+
 async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     """
-    Wysyła asynchroniczne zapytanie do ULDK GUGiK z uwzględnieniem cachowania w pamięci.
+    Wysyła asynchroniczne zapytanie do ULDK GUGiK po identyfikatorze TERYT.
+    Wykorzystuje pamięć podręczną (TTLCache).
     """
     teryt = teryt.strip()
 
     # Sprawdzenie cache
     if teryt in parcel_cache:
-        cached_response = parcel_cache[teryt]
-        # Zwracamy kopię, aby uniknąć mutacji obiektu w cache
-        return cached_response
+        return parcel_cache[teryt]
 
     metadata = parse_teryt_components(teryt)
     params = {
@@ -109,9 +137,9 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     }
 
     wkt_str: Optional[str] = None
-    geojson_data: Optional[Dict[str, Any]] = None
+    center_coords: Optional[PointCoordinates] = None
+    parcel_geometry: Optional[ParcelGeometry] = None
     area_ha = 2.5
-    center_lon, center_lat = 19.8, 52.3
 
     try:
         async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
@@ -132,28 +160,19 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
 
     if wkt_str:
         try:
-            poly = wkt.loads(wkt_str)
-            area_m2 = poly.area
-            area_ha = round(area_m2 / 10000.0, 2)
-            if area_ha < 0.01:
-                area_ha = 1.0
-
-            rep_point = poly.representative_point()
-            center_lon, center_lat = transform_2180_to_4326(rep_point.x, rep_point.y)
-
-            raw_geojson = mapping(poly)
-            transformed_coords = transform_coordinates_list(raw_geojson["coordinates"])
-            geojson_data = {
-                "type": raw_geojson["type"],
-                "coordinates": transformed_coords
-            }
+            clean_wkt = wkt_str.split(";")[-1].strip() if ";" in wkt_str else wkt_str.strip()
+            area_ha, center_coords, parcel_geometry = parse_wkt_2180_geometry(clean_wkt)
+            wkt_str = clean_wkt
         except Exception:
             wkt_str = None
+            parcel_geometry = None
 
-    if not geojson_data:
+    if not parcel_geometry or not center_coords:
         wkt_str, geojson_data, area_ha, (center_lon, center_lat) = generate_fallback_geometry(teryt)
+        center_coords = PointCoordinates(lat=round(center_lat, 6), lon=round(center_lon, 6))
+        parcel_geometry = ParcelGeometry(**geojson_data)
 
-    result = ParcelSearchResponse(
+    response = ParcelSearchResponse(
         teryt=teryt,
         voivodeship=metadata["voivodeship"],
         county=metadata["county"],
@@ -161,11 +180,85 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
         precinct=metadata["precinct"],
         parcel_number=metadata["parcel_number"],
         area_ha=area_ha,
-        center=PointCoordinates(lat=round(center_lat, 6), lon=round(center_lon, 6)),
-        geometry=ParcelGeometry(**geojson_data),
+        center=center_coords,
+        geometry=parcel_geometry,
         wkt_2180=wkt_str
     )
+    
+    # Zapis do cache TTL
+    parcel_cache[teryt] = response
+    return response
 
-    # Zapis do cache przed zwrotem
-    parcel_cache[teryt] = result
+
+async def fetch_parcel_by_point_from_uldk(lat: float, lon: float) -> ParcelSearchResponse:
+    """
+    Pobiera działkę ewidencyjną z ULDK GUGiK na podstawie współrzędnych kliknięcia (WGS84).
+    Wykorzystuje pamięć podręczną (TTLCache) opartą na zaokrąglonych współrzędnych.
+    """
+    lat_r = round(lat, 5)
+    lon_r = round(lon, 5)
+    cache_key = f"pt_{lat_r}_{lon_r}"
+    
+    if cache_key in parcel_cache:
+        return parcel_cache[cache_key]
+
+    params = {
+        "request": "GetParcelByXY",
+        "xy": f"{lon},{lat},4326",
+        "result": "teryt,voivodeship,county,commune,precinct,geom_wkt",
+        "srid": "2180",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
+            resp = await client.get(settings.ULDK_BASE_URL, params=params)
+            if resp.status_code != 200:
+                raise UldkServiceError(f"Błąd odpowiedzi usługi ULDK: HTTP {resp.status_code}")
+    except UldkServiceError:
+        raise
+    except Exception as exc:
+        raise UldkServiceError(f"Błąd połączenia z usługą ULDK: {exc}") from exc
+
+    lines = [line.strip() for line in resp.text.strip().splitlines() if line.strip()]
+    if not lines or lines[0] != "0" or len(lines) < 2:
+        raise ParcelNotFoundError("Nie odnaleziono działki w podanym punkcie.")
+
+    parts = lines[1].split("|")
+    if len(parts) < 6:
+        raise ParcelNotFoundError("Niekompletna odpowiedź z usługi ULDK.")
+
+    teryt_raw = parts[0].strip()
+    voivodeship_raw = parts[1].strip()
+    county_raw = parts[2].strip()
+    commune_raw = parts[3].strip()
+    precinct_raw = parts[4].strip()
+    geom_wkt_raw = parts[5].strip()
+
+    if not teryt_raw or not geom_wkt_raw:
+        raise ParcelNotFoundError("Brak identyfikatora TERYT lub geometrii działki.")
+
+    clean_wkt = geom_wkt_raw.split(";")[-1].strip() if ";" in geom_wkt_raw else geom_wkt_raw
+    fallback_meta = parse_teryt_components(teryt_raw)
+
+    try:
+        area_ha, center_coords, parcel_geometry = parse_wkt_2180_geometry(clean_wkt)
+    except Exception as exc:
+        raise ParcelNotFoundError(f"Nieprawidłowa geometria WKT działki: {exc}") from exc
+
+    result = ParcelSearchResponse(
+        teryt=teryt_raw,
+        voivodeship=voivodeship_raw or fallback_meta["voivodeship"],
+        county=county_raw or fallback_meta["county"],
+        commune=commune_raw or fallback_meta["commune"],
+        precinct=precinct_raw or fallback_meta["precinct"],
+        parcel_number=fallback_meta["parcel_number"],
+        area_ha=area_ha,
+        center=center_coords,
+        geometry=parcel_geometry,
+        wkt_2180=clean_wkt,
+    )
+
+    # Zapisz w cache pod kluczem współrzędnych oraz pod TERYT, żeby uniknąć duplikatów
+    parcel_cache[cache_key] = result
+    parcel_cache[teryt_raw] = result
     return result
