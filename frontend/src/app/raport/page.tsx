@@ -287,6 +287,7 @@ function ReportPageContent() {
 
             <Step2Retention
               recommendations={analysisResult.step2_retention}
+              diagnosis={analysisResult.step1_diagnosis}
             />
 
             <Step3Irrigation

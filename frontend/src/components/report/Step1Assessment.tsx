@@ -46,8 +46,16 @@ interface Step1AssessmentProps {
   forecastDecades: DecadeForecastPoint[];
 }
 
-function getRiskDetails(level: string) {
+function getRiskDetails(level: string, isWaterlogged: boolean) {
   const normalized = level.toUpperCase();
+  if (isWaterlogged || normalized.includes("NADMIAR")) {
+    return {
+      label:
+        "Nadmierne uwilgotnienie gleby (ryzyko zastoisk wodnych i niedotlenienia korzeni)",
+      calloutClass: "gov-callout-warning",
+      statusTextClass: "text-gov-warning font-bold",
+    };
+  }
   if (normalized === "WYSOKIE" || normalized === "HIGH") {
     return {
       label: "Wysokie zagrożenie suszą rolniczą",
@@ -63,7 +71,7 @@ function getRiskDetails(level: string) {
     };
   }
   return {
-    label: "Niskie zagrożenie suszą (dobre uwodnienie)",
+    label: "Niskie zagrożenie suszą (optymalne uwodnienie)",
     calloutClass: "gov-callout-success",
     statusTextClass: "text-gov-success font-bold",
   };
@@ -77,10 +85,28 @@ export default function Step1Assessment({
   weatherSeries,
   forecastDecades,
 }: Step1AssessmentProps) {
-  const risk = getRiskDetails(diagnosis.drought_risk_level);
+  const isWaterlogged =
+    diagnosis.drought_risk_level.toUpperCase().includes("NADMIAR") ||
+    diagnosis.kbw_30d_mm > Math.max(35, diagnosis.awc_mm * 0.85) ||
+    diagnosis.kbw_60d_mm > Math.max(60, diagnosis.awc_mm * 1.4);
+
+  const risk = getRiskDetails(diagnosis.drought_risk_level, isWaterlogged);
   const critThreshold =
     diagnosis.critical_threshold_kbw_60d_mm ??
     getCriticalThresholdForSoil(diagnosis.soil_category);
+
+  const effectiveCauses =
+    isWaterlogged &&
+    !diagnosis.primary_causes.some((c) =>
+      c.toLowerCase().includes("nadwyżka")
+    )
+      ? [
+          `Nadwyżka opadów nad parowaniem (KBW 30d: +${diagnosis.kbw_30d_mm.toFixed(1)} mm, KBW 60d: +${diagnosis.kbw_60d_mm.toFixed(1)} mm) przekracza pojemność wodną warstwy ornej (AWC: ${diagnosis.awc_mm.toFixed(1)} mm) — ryzyko zastoisk wodnych i niedotlenienia strefy korzeniowej.`,
+          ...diagnosis.primary_causes.filter(
+            (c) => !c.toLowerCase().includes("w granicach normy")
+          ),
+        ]
+      : diagnosis.primary_causes;
 
   const summaryBarData = [
     {
@@ -156,10 +182,16 @@ export default function Step1Assessment({
       {/* Komunikat statusu ryzyka */}
       <div className={risk.calloutClass}>
         <div className="text-sm font-bold text-gov-navy">
-          Poziom ryzyka: <span className={risk.statusTextClass}>{risk.label}</span>
+          Ocena stanu uwilgotnienia:{" "}
+          <span className={risk.statusTextClass}>{risk.label}</span>
         </div>
         <p className="text-sm text-gov-text mt-1 leading-relaxed">
-          Status bilansu wodnego: <strong>{diagnosis.kbw_status}</strong>{" "}
+          Status bilansu wodnego:{" "}
+          <strong>
+            {isWaterlogged
+              ? `Przesycenie profilu glebowego wodą (nadwyżka +${diagnosis.kbw_30d_mm.toFixed(1)} mm przekracza pojemność AWC ${diagnosis.awc_mm.toFixed(1)} mm)`
+              : diagnosis.kbw_status}
+          </strong>{" "}
           (przyjęty współczynnik zapotrzebowania uprawy Kc:{" "}
           <span className="font-mono font-semibold">
             {kcCoefficient.toFixed(2)}
@@ -631,15 +663,18 @@ export default function Step1Assessment({
         )}
       </div>
 
-      {/* 1.5 Główne przyczyny niedoboru wody */}
-      {diagnosis.primary_causes.length > 0 && (
+      {/* 1.5 Główne przyczyny niedoboru lub nadmiaru wody */}
+      {effectiveCauses.length > 0 && (
         <div className="space-y-3 pt-4">
           <h3 className="text-base font-bold text-gov-navy">
-            1.5. Główne przyczyny niedoboru wody na działce
+            1.5.{" "}
+            {isWaterlogged
+              ? "Zidentyfikowane przyczyny nadmiernego uwilgotnienia działki"
+              : "Główne przyczyny niedoboru wody na działce"}
           </h3>
           <div className="gov-callout-warning">
             <ol className="list-decimal list-inside space-y-2 text-sm text-gov-text">
-              {diagnosis.primary_causes.map((cause, idx) => (
+              {effectiveCauses.map((cause, idx) => (
                 <li key={idx} className="leading-relaxed">
                   <span className="font-medium">{cause}</span>
                 </li>

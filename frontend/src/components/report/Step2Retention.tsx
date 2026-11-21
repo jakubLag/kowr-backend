@@ -1,15 +1,74 @@
 "use client";
 
 import React from "react";
-import { RetentionAction } from "@/types/analysis";
+import { Diagnosis, RetentionAction } from "@/types/analysis";
 
 interface Step2RetentionProps {
   recommendations: RetentionAction[];
+  diagnosis?: Diagnosis;
 }
 
 export default function Step2Retention({
   recommendations,
+  diagnosis,
 }: Step2RetentionProps) {
+  const isWaterlogged =
+    diagnosis != null &&
+    (diagnosis.drought_risk_level.toUpperCase().includes("NADMIAR") ||
+      diagnosis.kbw_30d_mm > Math.max(35, diagnosis.awc_mm * 0.85) ||
+      diagnosis.kbw_60d_mm > Math.max(60, diagnosis.awc_mm * 1.4));
+
+  const adaptedRecommendations: RetentionAction[] = React.useMemo(() => {
+    if (!isWaterlogged || !diagnosis) return recommendations;
+
+    // Jeśli backend przysłał już nowe reguły drenażowe, używamy ich bezpośrednio
+    if (
+      recommendations.some(
+        (r) =>
+          r.id === "DRAINAGE_DITCH_OPEN_WEIR" ||
+          r.id === "SOIL_WATERLOGGING_SUBSOILING"
+      )
+    ) {
+      return recommendations;
+    }
+
+    const list: RetentionAction[] = [];
+    if (
+      diagnosis.distance_to_ditch_m != null &&
+      diagnosis.distance_to_ditch_m <= 300
+    ) {
+      list.push({
+        id: "DRAINAGE_DITCH_OPEN_WEIR",
+        title:
+          "Regulacja odpływu na rowie melioracyjnym (odprowadzenie nadmiaru wody zastoiskowej)",
+        badge: "Melioracja dwukierunkowa (Priorytet 1)",
+        why: `Na działce występuje znaczna nadwyżka wody (KBW 30d: +${diagnosis.kbw_30d_mm.toFixed(1)} mm) przekraczająca pojemność gleby (AWC: ${diagnosis.awc_mm.toFixed(1)} mm), a w odległości ${Math.round(diagnosis.distance_to_ditch_m)} m znajduje się rów melioracyjny.`,
+        action:
+          "Otwórz zastawkę piętrzącą i udrożnij przepusty na rowie melioracyjnym do czasu zejścia wody zastoiskowej, a po ustabilizowaniu wilgotności ponownie zamknij zastawkę, aby zachować rezerwę na okres wiosenno-letni.",
+        priority: 1,
+        category: "landscape",
+      });
+    }
+
+    list.push({
+      id: "SOIL_WATERLOGGING_SUBSOILING",
+      title:
+        "Głęboszowanie przełamujące podeszwę płużną i ochrona mokrej gleby przed ugniataniem",
+      badge: "Napowietrzenie profilu glebowego (Priorytet 1)",
+      why: `Nadmiar opadów (+${diagnosis.kbw_30d_mm.toFixed(1)} mm) wypełnił pory powietrzne w warstwie ornej (AWC: ${diagnosis.awc_mm.toFixed(1)} mm), co grozi niedotlenieniem i gniciem korzeni.`,
+      action:
+        "Wstrzymaj wjazd ciężkim sprzętem na przelaną glebę (aby nie zniszczyć jej struktury), a po obeschnięciu wykonaj głęboszowanie (35–45 cm) ułatwiające przesiąkanie nadmiaru wody do głębszych warstw.",
+      priority: 1,
+      category: "soil",
+    });
+
+    for (const rec of recommendations) {
+      if (rec.id !== "RETENTION_DITCH_WEIR") {
+        list.push(rec);
+      }
+    }
+    return list;
+  }, [isWaterlogged, diagnosis, recommendations]);
   return (
     <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:break-inside-avoid">
       <div>
@@ -33,7 +92,7 @@ export default function Step2Retention({
       </div>
 
       <div className="border border-gov-border divide-y divide-gov-border bg-white">
-        {recommendations.map((rec, index) => (
+        {adaptedRecommendations.map((rec, index) => (
           <div key={rec.id} className="p-5 sm:p-6 space-y-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2 pb-3 border-b border-gov-border">
               <h3 className="text-base sm:text-lg font-bold text-gov-navy">
