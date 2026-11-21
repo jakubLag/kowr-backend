@@ -30,6 +30,16 @@ class AnalyzeRequest(BaseModel):
     crop: str = Field(default="kukurydza", description="Gatunek uprawy (np. kukurydza, pszenica_ozima, rzepak)")
     target_date: Optional[str] = Field(default=None, description="Data analizy w formacie YYYY-MM-DD (domyślnie bieżąca data)")
 
+class DailyWeatherPoint(BaseModel):
+    date: str = Field(..., description="Data w formacie YYYY-MM-DD")
+    precipitation_mm: float = Field(..., description="Dobowa suma opadów (mm)")
+    et0_mm: float = Field(..., description="Dobowa ewapotranspiracja referencyjna ET0 (mm)")
+    kbw_daily_mm: float = Field(..., description="Dobowy bilans wodny P - ET0*Kc (mm)")
+    kbw_cumulative_mm: float = Field(..., description="Skumulowany bilans wodny KBW (mm)")
+    is_forecast: bool = Field(default=False, description="True dla prognozy 7-dniowej, False dla historii")
+    temp_max_c: Optional[float] = Field(None, description="Średnia/maksymalna temperatura dobowa (°C)")
+    wind_max_ms: Optional[float] = Field(None, description="Maksymalna prędkość wiatru (m/s)")
+
 class Diagnosis(BaseModel):
     kbw_30d_mm: float = Field(..., description="Klimatyczny Bilans Wodny za ostatnie 30 dni (mm)")
     kbw_60d_mm: float = Field(..., description="Klimatyczny Bilans Wodny za ostatnie 60 dni (mm)")
@@ -45,6 +55,11 @@ class Diagnosis(BaseModel):
     slope_percent: float = Field(..., description="Średni spadek terenu działki (%)")
     distance_to_ditch_m: Optional[float] = Field(None, description="Odległość do najbliższego rowu/cieku w buforze 500m (m)")
     primary_causes: List[str] = Field(..., description="Główne przyczyny deficytu wody zidentyfikowane na działce")
+    precipitation_30d_mm: Optional[float] = Field(None, description="Suma opadów z ostatnich 30 dni (mm)")
+    et0_30d_mm: Optional[float] = Field(None, description="Suma ET0 z ostatnich 30 dni (mm)")
+    forecast_7d_precip_mm: Optional[float] = Field(None, description="Prognozowana suma opadów na 7 dni (mm)")
+    forecast_7d_et0_mm: Optional[float] = Field(None, description="Prognozowana suma ET0 na 7 dni (mm)")
+    daily_weather_series: Optional[List[DailyWeatherPoint]] = Field(default=None, description="Szereg czasowy: 30 dni historii + 7 dni prognozy")
 
 class RetentionAction(BaseModel):
     id: str = Field(..., description="Unikalny identyfikator reguły")

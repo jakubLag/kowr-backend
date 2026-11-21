@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.models.schemas import (
     AnalyzeRequest,
     AnalysisResponse,
+    DailyWeatherPoint,
     Diagnosis,
     ReportMetadata
 )
@@ -155,6 +156,24 @@ async def analyze_parcel(request: AnalyzeRequest):
     )
 
     # Diagnoza (Etap 1)
+    daily_series = []
+    cum_kbw = 0.0
+    for pt in weather_data.get("raw_daily_series", []):
+        p_val = pt["precipitation_mm"]
+        et0_val = pt["et0_mm"]
+        kbw_d = round(p_val - (et0_val * kc), 1)
+        cum_kbw = round(cum_kbw + kbw_d, 1)
+        daily_series.append(DailyWeatherPoint(
+            date=pt["date"],
+            precipitation_mm=p_val,
+            et0_mm=et0_val,
+            kbw_daily_mm=kbw_d,
+            kbw_cumulative_mm=cum_kbw,
+            is_forecast=pt["is_forecast"],
+            temp_max_c=pt.get("temp_max_c"),
+            wind_max_ms=pt.get("wind_max_ms"),
+        ))
+
     step1_diag = Diagnosis(
         kbw_30d_mm=kbw_30d,
         kbw_60d_mm=kbw_60d,
@@ -169,7 +188,12 @@ async def analyze_parcel(request: AnalyzeRequest):
         ndmi_current=sentinel_data["ndmi_current"],
         slope_percent=terrain_data["slope_percent"],
         distance_to_ditch_m=terrain_data["distance_to_ditch_m"],
-        primary_causes=rules_eval["primary_causes"]
+        primary_causes=rules_eval["primary_causes"],
+        precipitation_30d_mm=weather_data.get("precipitation_30d_mm"),
+        et0_30d_mm=weather_data.get("et0_30d_mm"),
+        forecast_7d_precip_mm=weather_data.get("forecast_7d_precip_mm"),
+        forecast_7d_et0_mm=weather_data.get("forecast_7d_et0_mm"),
+        daily_weather_series=daily_series or None,
     )
 
     sources = [
