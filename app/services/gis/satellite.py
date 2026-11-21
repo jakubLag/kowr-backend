@@ -362,28 +362,35 @@ async def fetch_sentinel_indices(
         except Exception as e:
             logger.warning(f"[AWS STAC] Błąd połączenia / timeout: {e}")
 
-    # Awaryjne wartości domyślne oparte o profil referencyjny uprawy
-    ndvi_val = round(ndvi_reference * 0.9, 3) # Lekko zaniżone dla fallbacku
-    ndmi_val = 0.22
-
-    if best_item:
+    # Jeśli znaleziono bezchmurną scenę, pobieramy rzeczywiste wskaźniki z COG
+    if best_item is not None:
         real_ndvi, real_ndmi = extract_real_indices_from_cog(best_item, lon, lat)
         if real_ndvi is not None:
-            ndvi_val = real_ndvi
-            if real_ndmi is not None:
-                ndmi_val = real_ndmi
+            anomaly = round(((real_ndvi - ndvi_reference) / ndvi_reference) * 100.0, 1)
+            result = {
+                "ndvi_current": real_ndvi,
+                "ndvi_historical_median": ndvi_reference,
+                "ndvi_anomaly_percent": anomaly,
+                "ndmi_current": real_ndmi if real_ndmi is not None else 0.22,
+                "scene_date": scene_date,
+                "cloud_cover_percent": cloud_cover,
+                "is_fallback": False,
+                "limitation_note": None
+            }
+            _SATELLITE_CACHE[cache_key] = result
+            return result
 
-    anomaly = round(((ndvi_val - ndvi_reference) / ndvi_reference) * 100.0, 1)
-
+    # Brak dostępnych bezchmurnych scen lub błąd połączenia ze STAC/CDSE.
+    # Zgodnie z wytycznymi KOWR: ZERO pozornej precyzji - zwracamy None zamiast syntetycznych wartości.
     result = {
-        "ndvi_current": ndvi_val,
+        "ndvi_current": None,
         "ndvi_historical_median": ndvi_reference,
-        "ndvi_anomaly_percent": anomaly,
-        "ndmi_current": ndmi_val,
-        "scene_date": scene_date,
-        "cloud_cover_percent": cloud_cover,
-        "limitation_note": None
+        "ndvi_anomaly_percent": None,
+        "ndmi_current": None,
+        "scene_date": None,
+        "cloud_cover_percent": None,
+        "is_fallback": True,
+        "limitation_note": "Brak bezchmurnych zobrazowań Sentinel-2 (<15% zachmurzenia) lub brak połączenia z repozytorium STAC. Wskaźnik NDVI niedostępny – analizę oparto na bilansie KBW i retencji glebowej."
     }
-    
     _SATELLITE_CACHE[cache_key] = result
     return result

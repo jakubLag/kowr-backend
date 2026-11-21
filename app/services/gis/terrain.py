@@ -33,12 +33,39 @@ async def fetch_elevation_point(client: httpx.AsyncClient, northing: float, east
     return None
 
 
-async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: float) -> float:
+async def fetch_elevation_open_meteo(client: httpx.AsyncClient, lat: float, lon: float) -> Optional[float]:
     """
-    Oblicza rzeczywiste nachylenie stoku (%) z NMT GUGiK.
-    Pobiera wysokość centralną oraz punkty oddalone o 100 m na północ i wschód,
-    wyznaczając dwuwymiarowy wektor gradientu wysokości:
-    slope = sqrt((dh_N/100)^2 + (dh_E/100)^2) * 100%
+    Alternatywne wyznaczenie spadku terenu za pomocą 5-punktowego zapytania do Open-Meteo Elevation API.
+    Próbkuje środek oraz punkty oddalone o 100 m na N, S, E, W.
+    """
+    try:
+        dlat = 100.0 / 111000.0
+        dlon = 100.0 / (111000.0 * max(0.2, math.cos(math.radians(lat))))
+        lats = [lat, lat + dlat, lat - dlat, lat, lat]
+        lons = [lon, lon, lon, lon + dlon, lon - dlon]
+        lats_str = ",".join(f"{round(x, 5)}" for x in lats)
+        lons_str = ",".join(f"{round(x, 5)}" for x in lons)
+
+        url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
+        resp = await client.get(url, timeout=2.5)
+        if resp.status_code == 200:
+            elevations = resp.json().get("elevation", [])
+            if len(elevations) == 5 and all(isinstance(h, (int, float)) for h in elevations):
+                h_c, h_n, h_s, h_e, h_w = elevations
+                dh_ns = abs(h_n - h_s) / 200.0
+                dh_ew = abs(h_e - h_w) / 200.0
+                gradient = math.sqrt(dh_ns * dh_ns + dh_ew * dh_ew)
+                slope = round(gradient * 100.0, 1)
+                return max(0.1, min(35.0, slope))
+    except Exception as e:
+        logger.debug(f"[Elevation API] Błąd Open-Meteo Elevation: {e}")
+    return None
+
+
+async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: float) -> Tuple[float, bool]:
+    """
+    Oblicza rzeczywiste nachylenie stoku (%) z NMT GUGiK lub zapasowo Open-Meteo Elevation.
+    Zwraca krotkę (slope_percent, is_fallback).
     """
     northing, easting = transform_4326_to_2180(lon, lat)
 
@@ -56,15 +83,17 @@ async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: f
             dh_east = (h_east - h_center) / 100.0
             gradient = math.sqrt(dh_north * dh_north + dh_east * dh_east)
             slope = round(gradient * 100.0, 1)
-            return max(0.1, min(35.0, slope))
-        else:
-            print("[GUGiK NMT] Brak odpowiedzi z serwera NMT (timeout/błąd) - zastosowano spadek domyślny 1.8%")
-            logger.warning("[GUGiK NMT] Brak pełnych danych wysokościowych - fallback 1.8%")
+            return max(0.1, min(35.0, slope)), False
     except Exception as e:
-        print(f"[GUGiK NMT] Błąd obliczania spadku: {e} - zastosowano spadek domyślny 1.8%")
-        logger.warning(f"[GUGiK NMT] Błąd obliczania spadku: {e}")
+        logger.debug(f"[GUGiK NMT] Błąd zapytania NMT: {e}")
 
-    return 1.8
+    # Próba pobrania z Open-Meteo Elevation API
+    elevation_slope = await fetch_elevation_open_meteo(client, lat, lon)
+    if elevation_slope is not None:
+        return elevation_slope, False
+
+    print("[GUGiK NMT] Brak odpowiedzi z NMT i Elevation API - zastosowano spadek domyślny 1.8% (fallback)")
+    return 1.8, True
 
 
 async def get_imgw_stations(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
@@ -171,7 +200,8 @@ async def fetch_terrain_and_hydro(
         # 2. Sprawdzenie sieci hydrologicznej IMGW-PIB (913 państwowych stacji rzecznych)
         stations_task = get_imgw_stations(client)
 
-        slope_percent, stations = await asyncio.gather(slope_task, stations_task)
+        slope_res, stations = await asyncio.gather(slope_task, stations_task)
+        slope_percent, is_slope_fallback = slope_res
 
         if stations:
             min_dist = float("inf")
@@ -214,6 +244,7 @@ async def fetch_terrain_and_hydro(
 
     result = {
         "slope_percent": slope_percent,
+        "is_slope_fallback": is_slope_fallback,
         "distance_to_ditch_m": final_ditch_dist,
         "nearest_river": nearest_river,
         "river_distance_m": river_distance_m,
