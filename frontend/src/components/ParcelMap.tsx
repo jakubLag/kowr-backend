@@ -163,6 +163,8 @@ export default function ParcelMap({
 }: ParcelMapProps) {
   const [mapMode, setMapMode] = useState<"gugik" | "hybrid" | "osm">("gugik");
   const [showCadastralGrid, setShowCadastralGrid] = useState<boolean>(true);
+  const [showEdoDroughtLayer, setShowEdoDroughtLayer] =
+    useState<boolean>(false);
   const [currentZoom, setCurrentZoom] = useState<number>(
     parcel ? 16 : DEFAULT_ZOOM
   );
@@ -205,6 +207,18 @@ export default function ParcelMap({
               className="w-3.5 h-3.5 accent-gov-blue"
             />
             <span>Granice działek (KIEG)</span>
+          </label>
+          <label
+            className="inline-flex items-center gap-1.5 cursor-pointer select-none text-gov-text"
+            title="Europejskie Obserwatorium Suszy (Copernicus EDO — wskaźnik CDI)"
+          >
+            <input
+              type="checkbox"
+              checked={showEdoDroughtLayer}
+              onChange={(e) => setShowEdoDroughtLayer(e.target.checked)}
+              className="w-3.5 h-3.5 accent-gov-blue"
+            />
+            <span>Tło suszowe Europy (EDO Copernicus WMS)</span>
           </label>
         </div>
 
@@ -356,6 +370,20 @@ export default function ParcelMap({
             />
           )}
 
+          {/* Warstwa tła suszowego Europy (Copernicus EDO — Combined Drought Indicator WMS) */}
+          {showEdoDroughtLayer && (
+            <WMSTileLayer
+              url="https://drought.emergency.copernicus.eu/api/wms"
+              layers="cdiad"
+              format="image/png"
+              transparent={true}
+              version="1.1.1"
+              maxZoom={19}
+              opacity={0.55}
+              attribution="EDO Combined Drought Indicator &copy; Copernicus EMS"
+            />
+          )}
+
           {/* Warstwa granic i numerów działek KIEG WMS (aktywna od zoom >= 15) */}
           {kiegVisible && (
             <WMSTileLayer
@@ -447,8 +475,20 @@ export default function ParcelMap({
             />
             <span>Granice ewidencyjne KIEG (od przybliżenia 15)</span>
           </span>
+          {showEdoDroughtLayer && (
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className="inline-block w-4 h-3 border border-amber-700 bg-amber-400/60"
+              />
+              <span>EDO CDI (Copernicus): tło suszowe Europy</span>
+            </span>
+          )}
         </div>
-        <span>Źródła: GUGiK (Ortofotomapa, KIEG, ULDK)</span>
+        <span>
+          Źródła: GUGiK (Ortofotomapa, KIEG, ULDK)
+          {showEdoDroughtLayer ? ", Copernicus EDO WMS" : ""}
+        </span>
       </div>
     </div>
   );

@@ -7,6 +7,9 @@ import {
   WMSTileLayer,
   GeoJSON,
   Circle,
+  CircleMarker,
+  Polyline,
+  Tooltip,
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
@@ -62,6 +65,18 @@ export default function ReportHydroMap({
     diagnosis.distance_to_ditch_m != null && diagnosis.distance_to_ditch_m <= 500
       ? diagnosis.distance_to_ditch_m
       : null;
+  const waterwayCoords =
+    Array.isArray(diagnosis.nearest_waterway_coords) &&
+    diagnosis.nearest_waterway_coords.length >= 2
+      ? diagnosis.nearest_waterway_coords
+      : null;
+  const waterwayPoint =
+    Array.isArray(diagnosis.nearest_waterway_point) &&
+    diagnosis.nearest_waterway_point.length === 2
+      ? diagnosis.nearest_waterway_point
+      : waterwayCoords
+        ? waterwayCoords[Math.floor(waterwayCoords.length / 2)]
+        : null;
 
   return (
     <div className="border border-gov-border bg-white">
@@ -72,7 +87,12 @@ export default function ReportHydroMap({
         <span className="font-mono text-gov-secondary">
           Środek: {parcel.center.lat.toFixed(5)}°N,{" "}
           {parcel.center.lon.toFixed(5)}°E • Spadek:{" "}
-          {diagnosis.slope_percent.toFixed(1)}%
+          {diagnosis.slope_percent != null
+            ? `${diagnosis.slope_percent.toFixed(1)}%`
+            : "brak danych"}
+          {diagnosis.aspect_direction
+            ? ` (kierunek spływu: ${diagnosis.aspect_direction})`
+            : ""}
         </span>
       </div>
 
@@ -116,8 +136,8 @@ export default function ReportHydroMap({
             bufferRadiusM={ditchDist ?? 150}
           />
 
-          {/* Okrąg odległości do najbliższego rowu melioracyjnego */}
-          {ditchDist != null && (
+          {/* Okrąg odległości do najbliższego rowu (gdy brak geometrii linii cieku) */}
+          {ditchDist != null && !waterwayCoords && (
             <Circle
               center={[parcel.center.lat, parcel.center.lon]}
               radius={ditchDist}
@@ -129,6 +149,41 @@ export default function ReportHydroMap({
                 fillOpacity: 0.15,
               }}
             />
+          )}
+
+          {/* Faktyczna linia najbliższego cieku / rowu (gdy dostarczona przez API) */}
+          {waterwayCoords && (
+            <Polyline
+              positions={waterwayCoords}
+              pathOptions={{
+                color: "#00B8D4",
+                weight: 4.5,
+                opacity: 0.95,
+              }}
+            >
+              <Tooltip sticky>
+                Najbliższy ciek / rów melioracyjny
+                {ditchDist != null ? ` (${Math.round(ditchDist)} m)` : ""}
+              </Tooltip>
+            </Polyline>
+          )}
+
+          {/* Proponowane miejsce spowolnienia odpływu / zastawki */}
+          {waterwayPoint && (
+            <CircleMarker
+              center={waterwayPoint}
+              radius={7}
+              pathOptions={{
+                color: "#0B2240",
+                weight: 2,
+                fillColor: "#00E5FF",
+                fillOpacity: 0.95,
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -6]}>
+                Proponowane miejsce spowolnienia odpływu / zastawki
+              </Tooltip>
+            </CircleMarker>
           )}
 
           {/* Obrys badanej działki */}
@@ -154,12 +209,26 @@ export default function ReportHydroMap({
               Badana działka {parcel.teryt} ({parcel.area_ha} ha)
             </span>
           </span>
-          {ditchDist != null && (
+          {ditchDist != null ? (
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block w-3.5 h-3 border-2 border-dashed border-[#00B8D4] bg-[#00E5FF]/25" />
+              <span
+                className={
+                  waterwayCoords
+                    ? "inline-block w-4 h-1 bg-[#00B8D4]"
+                    : "inline-block w-3.5 h-3 border-2 border-dashed border-[#00B8D4] bg-[#00E5FF]/25"
+                }
+              />
               <span>
-                Promień do najbliższego rowu melioracyjnego (
-                {Math.round(ditchDist)} m — strefa retencji korytowej)
+                {waterwayCoords
+                  ? `Najbliższy ciek / rów melioracyjny (${Math.round(ditchDist)} m — strefa retencji korytowej)`
+                  : `Promień do najbliższego rowu melioracyjnego (${Math.round(ditchDist)} m — strefa retencji korytowej)`}
+              </span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-gov-secondary">
+              <span className="inline-block w-3 h-3 rounded-full border border-gov-muted bg-gov-surface" />
+              <span>
+                Brak cieków / rowów melioracyjnych w buforze 500 m
               </span>
             </span>
           )}

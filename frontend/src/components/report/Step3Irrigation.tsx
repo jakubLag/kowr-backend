@@ -2,15 +2,21 @@
 
 import React from "react";
 import {
+  DailyWeatherPoint,
   DecadeForecastPoint,
+  Diagnosis,
   IrrigationRecommendation,
 } from "@/types/analysis";
+import { computeWeatherWindowSummary } from "@/lib/reportHelpers";
 
 interface Step3IrrigationProps {
   irrigation: IrrigationRecommendation;
   areaHa: number;
   cropName: string;
   forecastDecades: DecadeForecastPoint[];
+  diagnosis?: Diagnosis;
+  weatherSeries?: DailyWeatherPoint[];
+  isArchive?: boolean;
 }
 
 export default function Step3Irrigation({
@@ -18,8 +24,17 @@ export default function Step3Irrigation({
   areaHa,
   cropName,
   forecastDecades,
+  diagnosis,
+  weatherSeries = [],
+  isArchive = false,
 }: Step3IrrigationProps) {
   const totalCubicMeters = Math.round(irrigation.dose_m3_per_ha * areaHa);
+  const weatherWindowSummary = computeWeatherWindowSummary(
+    irrigation,
+    diagnosis,
+    weatherSeries,
+    isArchive
+  );
 
   const total60dPrecip = Number(
     forecastDecades
@@ -96,27 +111,50 @@ export default function Step3Irrigation({
                   {irrigation.recommended_timing}
                 </td>
               </tr>
+              <tr>
+                <td className="font-bold">
+                  Okno pogodowe (najbliższe 7 dni)
+                </td>
+                <td
+                  className={`text-sm font-medium ${
+                    weatherWindowSummary.tone === "warning"
+                      ? "text-gov-warning font-semibold"
+                      : "text-gov-text"
+                  }`}
+                >
+                  {weatherWindowSummary.text}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
       ) : (
-        <div className="gov-callout-success">
-          <div className="text-sm font-bold text-gov-navy">
-            Status: {irrigation.status}
+        <div className="space-y-4">
+          <div className="gov-callout-success">
+            <div className="text-sm font-bold text-gov-navy">
+              Status: {irrigation.status}
+            </div>
+            <p className="text-sm text-gov-text mt-1 leading-relaxed">
+              {irrigation.justification}
+            </p>
           </div>
-          <p className="text-sm text-gov-text mt-1 leading-relaxed">
-            {irrigation.justification}
-          </p>
+          <div className="border border-gov-border bg-gov-surface/60 px-4 py-3 text-xs text-gov-text">
+            <strong className="text-gov-navy">
+              Okno pogodowe (najbliższe 7 dni):
+            </strong>{" "}
+            {weatherWindowSummary.text}
+          </div>
         </div>
       )}
 
-      {/* 3.1. Długoterminowa prognoza potrzeb wodnych na 60 dni (6 dekad po 10 dni) */}
+      {/* 3.1. Zestawienie dekadowe na 60 dni (prognoza lub weryfikacja ex-post) */}
       {forecastDecades.length > 0 && (
         <div className="space-y-3 pt-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-base font-bold text-gov-navy">
-              3.1. Długoterminowa prognoza potrzeb wodnych uprawy na 60 dni (6
-              dekad po 10 dni)
+              {isArchive
+                ? "3.1. Weryfikacja ex-post potrzeb wodnych uprawy w kolejnych 60 dniach (6 dekad po badanej dacie)"
+                : "3.1. Długoterminowa prognoza potrzeb wodnych uprawy na 60 dni (6 dekad po 10 dni)"}
             </h3>
             <span className="text-xs font-semibold text-gov-secondary tabular-nums">
               Horyzont 60 dni — opad:{" "}

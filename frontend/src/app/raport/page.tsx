@@ -14,14 +14,21 @@ import {
   ApiError,
   searchParcelByTeryt,
 } from "@/lib/api";
-import { getStoredParcel, saveStoredParcel } from "@/lib/parcelStore";
+import {
+  getStoredParcel,
+  saveStoredParcel,
+  updateRecentParcelAnalysis,
+} from "@/lib/parcelStore";
 import {
   getOrBuild60DayDecades,
   getOrBuildDailyWeatherSeries,
+  getTodayIsoString,
+  isHistoricalTargetDate,
 } from "@/lib/retentionSimulator";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 import LoadingAnalysis from "@/components/LoadingAnalysis";
+import BasicFarmerReport from "@/components/report/BasicFarmerReport";
 import Step1Assessment from "@/components/report/Step1Assessment";
 import Step2Retention from "@/components/report/Step2Retention";
 import Step3Irrigation from "@/components/report/Step3Irrigation";
@@ -32,13 +39,21 @@ function ReportPageContent() {
   const searchParams = useSearchParams();
   const terytParam = searchParams.get("teryt");
   const cropParam = (searchParams.get("crop") as CropType) || "kukurydza";
-  const dateParam = searchParams.get("date") || "2026-11-21";
+  const dateParam = searchParams.get("date") || getTodayIsoString();
+  const initialViewParam = searchParams.get("view");
+  const isArchive = useMemo(() => isHistoricalTargetDate(dateParam), [dateParam]);
 
+  const [viewMode, setViewMode] = useState<"basic" | "full">(
+    initialViewParam === "full" ? "full" : "basic"
+  );
   const [parcel, setParcel] = useState<ParcelSearchResponse | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(true);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] =
     useState<AnalysisResponse | null>(null);
+
+  const cropLabel =
+    CROP_OPTIONS.find((c) => c.id === cropParam)?.name_pl || cropParam;
 
   useEffect(() => {
     if (!terytParam) {
@@ -69,9 +84,34 @@ function ReportPageContent() {
           target_date: dateParam,
         });
         setAnalysisResult(res);
+        const resolvedParcel = res.parcel_info || currentParcel;
         if (res.parcel_info && !currentParcel) {
           setParcel(res.parcel_info);
           saveStoredParcel(res.parcel_info);
+        }
+        if (resolvedParcel) {
+          const isWaterlogged =
+            res.step1_diagnosis.drought_risk_level
+              .toUpperCase()
+              .includes("NADMIAR") ||
+            res.step1_diagnosis.kbw_30d_mm >
+              Math.max(35, res.step1_diagnosis.awc_mm * 0.85) ||
+            res.step1_diagnosis.kbw_60d_mm >
+              Math.max(60, res.step1_diagnosis.awc_mm * 1.4);
+
+          updateRecentParcelAnalysis(resolvedParcel, {
+            riskLevel: isWaterlogged
+              ? "NADMIAR"
+              : res.step1_diagnosis.drought_risk_level,
+            kbw30dMm: res.step1_diagnosis.kbw_30d_mm,
+            crop: cropParam,
+            cropLabel,
+            targetDate: res.metadata.target_date || dateParam,
+            analyzedAt:
+              res.metadata.generated_at ||
+              res.metadata.analysis_date ||
+              getTodayIsoString(),
+          });
         }
       } catch (err) {
         if (err instanceof ApiError) {
@@ -87,14 +127,25 @@ function ReportPageContent() {
     }
 
     loadParcelAndAnalyze(terytParam);
-  }, [terytParam, cropParam, dateParam]);
+  }, [terytParam, cropParam, dateParam, cropLabel]);
 
   const handlePrintPdf = () => {
     window.print();
   };
 
-  const cropLabel =
-    CROP_OPTIONS.find((c) => c.id === cropParam)?.name_pl || cropParam;
+  const handleSwitchViewMode = (mode: "basic" | "full") => {
+    setViewMode(mode);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const targetStateDate =
+    analysisResult?.metadata.target_date || dateParam;
+  const generatedAtLabel =
+    analysisResult?.metadata.generated_at ||
+    analysisResult?.metadata.analysis_date ||
+    getTodayIsoString();
 
   const weatherSeries = useMemo(() => {
     if (!analysisResult) return [];
@@ -191,19 +242,70 @@ function ReportPageContent() {
                 onClick={handlePrintPdf}
                 className="gov-btn-primary"
               >
-                Pobierz raport PDF / Drukuj
+                {viewMode === "basic"
+                  ? "Pobierz raport PDF (wersja podstawowa)"
+                  : "Pobierz pełny raport PDF"}
               </button>
+            </div>
+
+            {/* Przełącznik wersji raportu: Podstawowy (dla rolnika) vs Pełny (szczegółowy) */}
+            <div className="bg-gov-surface border border-gov-border p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
+              <div className="space-y-0.5">
+                <div className="text-xs font-bold text-gov-navy">
+                  Tryb wyświetlania raportu
+                </div>
+                <p className="text-xs text-gov-secondary">
+                  {viewMode === "basic"
+                    ? "Widok podstawowy — najważniejsze wnioski i zalecenia prostym językiem dla rolnika."
+                    : "Pełny raport szczegółowy — wykresy, dane satelitarne Sentinel-2, mapa, 6 dekad i źródła."}
+                </p>
+              </div>
+              <div
+                role="tablist"
+                aria-label="Wybór wersji raportu"
+                className="inline-flex border border-gov-border bg-white rounded-[2px] overflow-hidden shrink-0"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === "basic"}
+                  onClick={() => setViewMode("basic")}
+                  className={`px-3.5 py-2 text-xs font-semibold border-r border-gov-border transition-colors ${
+                    viewMode === "basic"
+                      ? "bg-gov-blue text-white"
+                      : "text-gov-text hover:bg-gov-surface"
+                  }`}
+                >
+                  Widok dla rolnika (podstawowy)
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === "full"}
+                  onClick={() => setViewMode("full")}
+                  className={`px-3.5 py-2 text-xs font-semibold transition-colors ${
+                    viewMode === "full"
+                      ? "bg-gov-blue text-white"
+                      : "text-gov-text hover:bg-gov-surface"
+                  }`}
+                >
+                  Pełny raport szczegółowy
+                </button>
+              </div>
             </div>
 
             {/* Nagłówek urzędowy raportu */}
             <header className="space-y-5">
               <div className="hidden print:flex items-center justify-between pb-3 border-b-2 border-gov-navy text-xs">
                 <div>
-                  Krajowy Ośrodek Wsparcia Rolnictwa — System Wsparcia
-                  Gospodarowania Wodą w Rolnictwie
+                  Krajowy Ośrodek Wsparcia Rolnictwa —{" "}
+                  {viewMode === "basic"
+                    ? "Raport podstawowy (dla rolnika)"
+                    : "Pełny raport szczegółowy"}
                 </div>
                 <div className="font-mono">
-                  Data analizy: {analysisResult.metadata.analysis_date}
+                  Data badanego stanu: {targetStateDate} • Wygenerowano:{" "}
+                  {generatedAtLabel}
                 </div>
               </div>
 
@@ -226,7 +328,8 @@ function ReportPageContent() {
                     <th>Położenie (gmina / obręb)</th>
                     <th>Powierzchnia</th>
                     <th>Badana uprawa</th>
-                    <th>Data analizy</th>
+                    <th>Data badanego stanu</th>
+                    <th>Wygenerowano</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -243,8 +346,16 @@ function ReportPageContent() {
                       {analysisResult.parcel_info.area_ha} ha
                     </td>
                     <td className="font-bold">{cropLabel}</td>
-                    <td className="font-mono">
-                      {analysisResult.metadata.analysis_date}
+                    <td className="font-mono font-bold text-gov-navy">
+                      {targetStateDate}
+                      {isArchive && (
+                        <span className="block text-[10px] font-sans font-semibold text-gov-secondary">
+                          analiza historyczna
+                        </span>
+                      )}
+                    </td>
+                    <td className="font-mono text-xs text-gov-secondary">
+                      {generatedAtLabel}
                     </td>
                   </tr>
                 </tbody>
@@ -276,36 +387,70 @@ function ReportPageContent() {
               </div>
             </header>
 
-            <Step1Assessment
-              diagnosis={analysisResult.step1_diagnosis}
-              parcelInfo={analysisResult.parcel_info || parcel}
-              cropName={cropLabel}
-              kcCoefficient={analysisResult.kc_coefficient}
-              weatherSeries={weatherSeries}
-              forecastDecades={forecastDecades}
-            />
+            {viewMode === "basic" ? (
+              <BasicFarmerReport
+                analysis={analysisResult}
+                cropLabel={cropLabel}
+                weatherSeries={weatherSeries}
+                isArchive={isArchive}
+                onOpenFullReport={() => handleSwitchViewMode("full")}
+              />
+            ) : (
+              <>
+                <Step1Assessment
+                  diagnosis={analysisResult.step1_diagnosis}
+                  parcelInfo={analysisResult.parcel_info || parcel}
+                  cropName={cropLabel}
+                  kcCoefficient={analysisResult.kc_coefficient}
+                  weatherSeries={weatherSeries}
+                  forecastDecades={forecastDecades}
+                  targetDate={targetStateDate}
+                  isArchive={isArchive}
+                />
 
-            <Step2Retention
-              recommendations={analysisResult.step2_retention}
-              diagnosis={analysisResult.step1_diagnosis}
-            />
+                <Step2Retention
+                  recommendations={analysisResult.step2_retention}
+                  diagnosis={analysisResult.step1_diagnosis}
+                />
 
-            <Step3Irrigation
-              irrigation={analysisResult.step3_irrigation}
-              areaHa={analysisResult.parcel_info.area_ha}
-              cropName={cropLabel}
-              forecastDecades={forecastDecades}
-            />
+                <Step3Irrigation
+                  irrigation={analysisResult.step3_irrigation}
+                  areaHa={analysisResult.parcel_info.area_ha}
+                  cropName={cropLabel}
+                  forecastDecades={forecastDecades}
+                  diagnosis={analysisResult.step1_diagnosis}
+                  weatherSeries={weatherSeries}
+                  isArchive={isArchive}
+                />
 
-            <CropRotationComparison
-              teryt={analysisResult.teryt}
-              currentCropId={cropParam}
-              currentKc={analysisResult.kc_coefficient}
-              analysisDate={dateParam || analysisResult.metadata.analysis_date}
-              diagnosis={analysisResult.step1_diagnosis}
-            />
+                <CropRotationComparison
+                  teryt={analysisResult.teryt}
+                  currentCropId={cropParam}
+                  currentKc={analysisResult.kc_coefficient}
+                  analysisDate={targetStateDate}
+                  diagnosis={analysisResult.step1_diagnosis}
+                />
 
-            <TransparencyBox metadata={analysisResult.metadata} />
+                <TransparencyBox
+                  metadata={analysisResult.metadata}
+                  diagnosis={analysisResult.step1_diagnosis}
+                  targetDate={targetStateDate}
+                />
+
+                <div className="pt-4 border-t border-gov-border flex flex-wrap items-center justify-between gap-3 print:hidden">
+                  <span className="text-xs text-gov-secondary">
+                    Przeglądasz pełny raport szczegółowy (wersja doradcza).
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchViewMode("basic")}
+                    className="gov-btn-secondary text-xs py-2 px-4"
+                  >
+                    ← Wróć do uproszczonego widoku dla rolnika
+                  </button>
+                </div>
+              </>
+            )}
 
             {/* Stopka dla wydruku PDF A4 */}
             <footer className="hidden print:block pt-4 border-t border-gov-border text-xs text-gov-secondary">

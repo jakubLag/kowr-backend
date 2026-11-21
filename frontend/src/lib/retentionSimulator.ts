@@ -27,6 +27,25 @@ const MONTHLY_NORMALS_PL: Record<
   12: { et0Daily: 0.4, precipMonthly: 36.0, temp: 0.5 },
 };
 
+export function getTodayIsoString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Zwraca true, jeśli analizowana data jest historyczna (starsza niż dzisiaj).
+ * Dla dat historycznych kolejne 60 dni nie są „prognozą pogody”, lecz weryfikacją ex-post.
+ */
+export function isHistoricalTargetDate(targetDateRaw?: string | null): boolean {
+  if (!targetDateRaw) return false;
+  const datePart = targetDateRaw.split(" ")[0].trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return false;
+  return datePart < getTodayIsoString();
+}
+
 export function getCriticalThresholdForSoil(soilCategory: string): number {
   const map: Record<string, number> = {
     "bardzo lekka": -130.0,
@@ -65,15 +84,24 @@ export function getOrBuildDailyWeatherSeries(
 ): DailyWeatherPoint[] {
   const cropObj =
     CROP_OPTIONS.find((c) => c.id === cropId.toLowerCase()) || CROP_OPTIONS[0];
+  const isArchive = isHistoricalTargetDate(analysisDateRaw);
 
   const existing = diagnosis.daily_weather_series;
   if (Array.isArray(existing) && existing.length > 0) {
-    const histPoints = existing.filter((d) => !d.is_forecast);
+    const histPoints: DailyWeatherPoint[] = existing
+      .filter((d) => !d.is_forecast)
+      .map((d) => ({ ...d, forecast_kind: "historical" }));
     const directForecast = existing.filter((d) => d.is_forecast);
 
-    // Bierzemy pierwsze 16 dni prawdziwej prognozy synoptycznej z Open-Meteo,
-    // a dni +17..+60 budujemy z naturalnego wzorca opadowego historii działki
-    const trustedForecast = directForecast.slice(0, 16);
+    // Dla daty bieżącej: pierwsze 16 dni to prognoza synoptyczna Open-Meteo,
+    // a dni +17..+60 to scenariusz klimatologiczny.
+    // Dla daty historycznej: cały okres po dacie badania oznaczamy jako weryfikację ex-post.
+    const trustedForecast: DailyWeatherPoint[] = directForecast
+      .slice(0, 16)
+      .map((d) => ({
+        ...d,
+        forecast_kind: isArchive ? "ex_post" : "synoptic_16d",
+      }));
     const combined: DailyWeatherPoint[] = [...histPoints, ...trustedForecast];
 
     const lastPt = combined[combined.length - 1];
@@ -119,6 +147,7 @@ export function getOrBuildDailyWeatherSeries(
         kbw_daily_mm: kbwDaily,
         kbw_cumulative_mm: 0,
         is_forecast: true,
+        forecast_kind: isArchive ? "ex_post" : "climatology",
         temp_max_c: Number((norm.temp + 2.2 * Math.sin(f * 0.55)).toFixed(1)),
         wind_max_ms: Number(
           (2.1 + 1.8 * Math.abs(Math.sin(f * 0.8 + 0.5))).toFixed(1)
@@ -173,6 +202,7 @@ export function getOrBuildDailyWeatherSeries(
       kbw_daily_mm: kbwDaily,
       kbw_cumulative_mm: 0,
       is_forecast: false,
+      forecast_kind: "historical",
       temp_max_c: Number((norm.temp + 2.0 * Math.sin(dayIndex * 0.5)).toFixed(1)),
       wind_max_ms: Number(
         (2.2 + 1.5 * Math.abs(Math.sin(dayIndex * 0.9))).toFixed(1)
@@ -208,6 +238,7 @@ export function getOrBuildDailyWeatherSeries(
       kbw_daily_mm: kbwDaily,
       kbw_cumulative_mm: 0,
       is_forecast: true,
+      forecast_kind: isArchive ? "ex_post" : "climatology",
       temp_max_c: Number((norm.temp + 2.2 * Math.sin(f * 0.55)).toFixed(1)),
       wind_max_ms: Number(
         (2.1 + 1.8 * Math.abs(Math.sin(f * 0.8 + 0.5))).toFixed(1)
@@ -244,7 +275,9 @@ export function getOrBuild60DayDecades(
     const endDate = chunk[chunk.length - 1].date;
     const m = parseInt(startDate.split("-")[1] || "7", 10) || 7;
     const decKc = calculateCropKcForMonth(cropObj, m);
-    const stage = getMonthGrowthStageDescription(m).split("(")[0].trim();
+    const stage = getMonthGrowthStageDescription(m, cropObj.id)
+      .split("(")[0]
+      .trim();
 
     const precipSum = Number(
       chunk.reduce((acc, c) => acc + c.precipitation_mm, 0).toFixed(1)
