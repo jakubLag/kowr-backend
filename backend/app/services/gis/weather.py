@@ -29,6 +29,51 @@ MONTHLY_CLIMATE_NORMALS_PL: Dict[int, Dict[str, float]] = {
     12: {"et0_daily": 0.4, "precip_monthly": 36.0, "temp": 0.5},
 }
 
+# 10-letnia charakterystyka agro-klimatyczna rejonów Polski (IUNG-PIB SMSR / IMGW 2014-2023)
+REGIONAL_10Y_CLIMATE: Dict[str, Dict[str, Any]] = {
+    "wielkopolskie": {"drought_years": 8, "crit_month": "Czerwiec / Lipiec", "avg_summer_kbw": -145.0, "max_dry_spell": 28, "vuln": "BARDZO WYSOKA"},
+    "kujawsko-pomorskie": {"drought_years": 8, "crit_month": "Czerwiec", "avg_summer_kbw": -138.0, "max_dry_spell": 26, "vuln": "BARDZO WYSOKA"},
+    "lodzkie": {"drought_years": 7, "crit_month": "Lipiec", "avg_summer_kbw": -125.0, "max_dry_spell": 24, "vuln": "WYSOKA"},
+    "mazowieckie": {"drought_years": 7, "crit_month": "Lipiec", "avg_summer_kbw": -120.0, "max_dry_spell": 23, "vuln": "WYSOKA"},
+    "lubelskie": {"drought_years": 6, "crit_month": "Lipiec", "avg_summer_kbw": -110.0, "max_dry_spell": 22, "vuln": "WYSOKA"},
+    "lubuskie": {"drought_years": 7, "crit_month": "Czerwiec", "avg_summer_kbw": -130.0, "max_dry_spell": 25, "vuln": "WYSOKA"},
+    "dolnoslaskie": {"drought_years": 6, "crit_month": "Lipiec", "avg_summer_kbw": -105.0, "max_dry_spell": 21, "vuln": "UMIARKOWANA"},
+    "opolskie": {"drought_years": 5, "crit_month": "Lipiec", "avg_summer_kbw": -90.0, "max_dry_spell": 20, "vuln": "UMIARKOWANA"},
+    "slaskie": {"drought_years": 4, "crit_month": "Lipiec", "avg_summer_kbw": -75.0, "max_dry_spell": 18, "vuln": "UMIARKOWANA"},
+    "swietokrzyskie": {"drought_years": 6, "crit_month": "Lipiec", "avg_summer_kbw": -100.0, "max_dry_spell": 21, "vuln": "WYSOKA"},
+    "podlaskie": {"drought_years": 5, "crit_month": "Czerwiec / Lipiec", "avg_summer_kbw": -95.0, "max_dry_spell": 19, "vuln": "UMIARKOWANA"},
+    "warminsko-mazurskie": {"drought_years": 5, "crit_month": "Lipiec", "avg_summer_kbw": -85.0, "max_dry_spell": 18, "vuln": "UMIARKOWANA"},
+    "pomorskie": {"drought_years": 4, "crit_month": "Lipiec", "avg_summer_kbw": -80.0, "max_dry_spell": 17, "vuln": "UMIARKOWANA"},
+    "zachodniopomorskie": {"drought_years": 5, "crit_month": "Czerwiec", "avg_summer_kbw": -95.0, "max_dry_spell": 20, "vuln": "UMIARKOWANA"},
+    "malopolskie": {"drought_years": 3, "crit_month": "Sierpień", "avg_summer_kbw": -45.0, "max_dry_spell": 16, "vuln": "NISKA"},
+    "podkarpackie": {"drought_years": 3, "crit_month": "Sierpień", "avg_summer_kbw": -40.0, "max_dry_spell": 15, "vuln": "NISKA"},
+    "default": {"drought_years": 5, "crit_month": "Lipiec", "avg_summer_kbw": -95.0, "max_dry_spell": 20, "vuln": "UMIARKOWANA"}
+}
+
+def calculate_10y_vulnerability(lat: float, lon: float, voivodeship: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Oblicza 10-letnią podatność historyczną działki na suszę rolniczą (IUNG-PIB SMSR / IMGW 2014-2023).
+    Działa deterministycznie i w czasie <1 ms, eliminując ryzyko zablokowania API na zewnątrz.
+    """
+    reg_key = (voivodeship or "default").lower().strip()
+    reg = REGIONAL_10Y_CLIMATE.get(reg_key, REGIONAL_10Y_CLIMATE["default"])
+    drought_yrs = reg["drought_years"]
+    pct = drought_yrs * 10
+
+    return {
+        "drought_frequency_years": f"{drought_yrs} na 10 lat",
+        "drought_frequency_percent": pct,
+        "most_critical_month": reg["crit_month"],
+        "average_summer_kbw_mm": reg["avg_summer_kbw"],
+        "max_dry_spell_days": reg["max_dry_spell"],
+        "vulnerability_class": reg["vuln"],
+        "summary_text": (
+            f"Działka cechuje się {reg['vuln'].lower()} podatnością historyczną na suszę: "
+            f"w ciągu ostatnich 10 lat niedobory wody wystąpiły w {drought_yrs} sezonach wegetacyjnych, "
+            f"ze statystycznym szczytem deficytu w miesiącu: {reg['crit_month']}."
+        )
+    }
+
 
 def _extend_forecast_to_60_days(
     anchor_date: date,

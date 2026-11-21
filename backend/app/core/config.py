@@ -51,12 +51,13 @@ class Settings(BaseModel):
     OVERPASS_API_URL: str = "https://overpass-api.de/api/interpreter"
 
 
-    # CORS origins
+    # CORS origins (zgodne z wytycznymi bezpieczeństwa pkt 5.6)
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5173",
-        "*"
+        "https://145.239.90.237.nip.io",
+        "https://kowr-front.vercel.app"
     ]
 
 settings = Settings()

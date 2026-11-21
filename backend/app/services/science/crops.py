@@ -171,33 +171,62 @@ CROP_DATABASE: Dict[str, Dict[str, Any]] = {
 
 def get_crop_kc(crop_name: str, month: int = 7) -> float:
     """
-    Zwraca odpowiedni współczynnik Kc dla danej uprawy w zależności od miesiąca.
+    Zwraca odpowiedni współczynnik Kc dla danej uprawy w zależności od miesiąca i fenologii
+    (z rozróżnieniem kalendarza wegetacyjnego ozimin od upraw jarych).
     """
     crop_key = crop_name.lower().replace(" ", "_").replace("-", "_")
     crop = CROP_DATABASE.get(crop_key, CROP_DATABASE["kukurydza"])
-    
-    if month <= 4:
-        return crop["kc_initial"]
-    elif month in [5, 6]:
-        return (crop["kc_initial"] + crop["kc_mid"]) / 2.0
-    elif month in [7, 8]:
-        return crop["kc_mid"]
+    is_winter = crop_key in ["pszenica_ozima", "rzepak", "zyto"]
+
+    if is_winter:
+        # Oziminy: szczyt wegetacji w maju-czerwcu, zbiór w lipcu-sierpniu (ściernisko)
+        if month <= 3:
+            return crop["kc_initial"]
+        elif month in [4, 5]:
+            return crop["kc_mid"]
+        elif month == 6:
+            return crop["kc_mid"]
+        elif month == 7:
+            return (crop["kc_mid"] + crop["kc_end"]) / 2.0  # dojrzewanie / zbiór
+        else:  # sierpień i później: po żniwach (ściernisko)
+            return crop["kc_end"]
     else:
-        return crop["kc_end"]
+        # Uprawy jare i późne (kukurydza, burak, pszenica jara): szczyt w lipcu-sierpniu
+        if month <= 4:
+            return crop["kc_initial"]
+        elif month in [5, 6]:
+            return (crop["kc_initial"] + crop["kc_mid"]) / 2.0
+        elif month in [7, 8]:
+            return crop["kc_mid"]
+        else:
+            return crop["kc_end"]
 
 
 def get_crop_ndvi_reference(crop_name: str, month: int = 7) -> float:
     """
     Zwraca referencyjną (zdrową) wartość NDVI dla danej uprawy i miesiąca,
-    zastępując dotychczasową sztywną medianę 0.68 precyzyjnym profilem roślinnym.
+    uwzględniając cykl fenologiczny ozimin (żniwa w lipcu/sierpniu) i jarych.
     """
     crop_key = crop_name.lower().replace(" ", "_").replace("-", "_")
     crop = CROP_DATABASE.get(crop_key, CROP_DATABASE["kukurydza"])
     ndvi_ref = crop.get("ndvi_reference", {"early": 0.4, "mid": 0.75, "late": 0.4})
+    is_winter = crop_key in ["pszenica_ozima", "rzepak", "zyto"]
 
-    if month <= 4:
-        return ndvi_ref["early"]
-    elif month in [5, 6, 7, 8]:
-        return ndvi_ref["mid"]
+    if is_winter:
+        if month <= 3:
+            return ndvi_ref["early"] * 0.7
+        elif month in [4, 5]:
+            return ndvi_ref["mid"]
+        elif month == 6:
+            return ndvi_ref["mid"]
+        elif month == 7:
+            return (ndvi_ref["mid"] + ndvi_ref["late"]) / 2.0
+        else:
+            return ndvi_ref["late"]  # sierpień: ściernisko ~0.25
     else:
-        return ndvi_ref["late"]
+        if month <= 4:
+            return ndvi_ref["early"]
+        elif month in [5, 6, 7, 8]:
+            return ndvi_ref["mid"]
+        else:
+            return ndvi_ref["late"]

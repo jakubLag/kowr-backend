@@ -9,10 +9,11 @@ from app.models.schemas import (
     DailyWeatherPoint,
     DecadeForecastPoint,
     Diagnosis,
-    ReportMetadata
+    ReportMetadata,
+    ClimateVulnerability10Y
 )
 from app.services.gis.uldk import fetch_parcel_from_uldk
-from app.services.gis.weather import fetch_weather_data
+from app.services.gis.weather import fetch_weather_data, calculate_10y_vulnerability
 from app.services.gis.satellite import fetch_sentinel_indices
 from app.services.gis.soil import fetch_soil_properties
 from app.services.gis.terrain import fetch_terrain_and_hydro
@@ -161,12 +162,20 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     # 5. Generowanie ustrukturyzowanych kart zaleceń (Report Generator)
     retention_actions = generate_retention_actions(rules_eval["active_rules"])
+    
+    fc_7d_p = weather_data.get("forecast_7d_precip_mm") or 0.0
+    wind_max_7d = max(
+        [pt.get("wind_max_ms") or 0.0 for pt in weather_data.get("raw_daily_series", [])[-16:]] or [0.0]
+    )
+
     irrigation_rec = generate_irrigation_recommendation(
         irrigation_needed=rules_eval["irrigation_needed"],
         deficit_mm=rules_eval["deficit_mm"],
         awc_mm=soil_data["awc_mm"],
         soil_category=soil_data["soil_category"],
-        crop_name=request.crop
+        crop_name=request.crop,
+        forecast_7d_precip_mm=fc_7d_p,
+        wind_max_ms=wind_max_7d
     )
 
     # Diagnoza (Etap 1) + Szereg 60 dni historii i 60 dni prognozy długoterminowej (6 dekad)
@@ -278,6 +287,9 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     forecast_60d_kbw_total = round(sum(d.kbw_decade_mm for d in decades_list), 1) if decades_list else None
 
+    # Obliczenie 10-letniej podatności historycznej działki na suszę rolniczą
+    vulnerability_10y = calculate_10y_vulnerability(lat, lon, parcel.voivodeship)
+
     step1_diag = Diagnosis(
         kbw_30d_mm=kbw_30d,
         kbw_60d_mm=kbw_60d,
@@ -303,6 +315,7 @@ async def analyze_parcel(request: AnalyzeRequest):
         critical_threshold_kbw_60d_mm=crit_threshold_60d,
         daily_weather_series=daily_series or None,
         forecast_60d_decades=decades_list or None,
+        historical_vulnerability=ClimateVulnerability10Y(**vulnerability_10y),
     )
 
     sources = [
@@ -310,18 +323,47 @@ async def analyze_parcel(request: AnalyzeRequest):
         "Meteorologia: Open-Meteo Archive / Forecast API (metodyka FAO-56 Penman-Monteith)",
         "Teledetekcja: Copernicus Data Space Ecosystem (CDSE) / Sentinel-2 L2A Process API",
         "Gleba i uziarnienie: ISRIC SoilGrids v2.0 REST API + równania Saxtona & Rawlsa (2006)",
-        "Hydrografia i rzeźba: IMGW-PIB Hydro / PGW Wody Polskie Hydroportal + Geoportal NMT"
+        "Hydrografia i rzeźba: IMGW-PIB Hydro / OpenStreetMap Hydro + Geoportal NMT"
     ]
 
     exec_time_ms = int((time.time() - start_time) * 1000)
 
+    # Obliczenie wskaźnika wiarygodności danych (Confidence Index)
+    conf_score = 100
+    if weather_data.get("is_fallback"):
+        conf_score -= 15
+    if sentinel_data.get("ndvi_current") is None:
+        conf_score -= 20
+    if soil_data.get("is_fallback"):
+        conf_score -= 20
+    if terrain_data.get("is_slope_fallback"):
+        conf_score -= 10
+    if getattr(parcel, "is_fallback", False):
+        conf_score -= 15
+
+    conf_level = "Wysoka" if conf_score >= 80 else ("Średnia" if conf_score >= 55 else "Obniżona")
+
+    target_date_label = request.target_date or datetime.now().strftime("%Y-%m-%d")
+
+    data_freshness = {
+        "Granice działki (ULDK GUGiK)": "Kataster bieżący (stan na żywo)" if not getattr(parcel, "is_fallback", False) else "Przybliżona lokalizacja TERYT",
+        "Meteorologia (Open-Meteo)": f"Zakres 60 dni wstecz do {target_date_label}",
+        "Teledetekcja (Sentinel-2)": f"Scena z dnia {sentinel_data.get('scene_date')}" if sentinel_data.get("scene_date") else "Brak bezchmurnej sceny (<15% chmur)",
+        "Gleba (ISRIC SoilGrids)": "Model statyczny 250 m (ISRIC v2.0)" if not soil_data.get("is_fallback") else "Profil referencyjny IUNG",
+        "Wysokość i cieki (NMT / OSM)": "Numeryczny Model Terenu GUGiK / OpenStreetMap"
+    }
+
     metadata = ReportMetadata(
         sources=sources,
         analysis_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        target_date=target_date_label,
         sentinel_scene_date=sentinel_data.get("scene_date"),
         cloud_cover_percent=sentinel_data.get("cloud_cover_percent"),
         limitations=limitations,
-        execution_time_ms=exec_time_ms
+        execution_time_ms=exec_time_ms,
+        data_freshness=data_freshness,
+        confidence_level=conf_level,
+        confidence_score=conf_score
     )
 
     return AnalysisResponse(

@@ -43,14 +43,25 @@ export default function Step3Irrigation({
 
       {irrigation.needed ? (
         <div className="space-y-6">
-          <div className="gov-callout-info">
-            <div className="text-sm font-bold text-gov-navy">
-              Status: {irrigation.status}
+          {irrigation.weather_window_status === "WSTRZYMAJ_OPADY" ? (
+            <div className="p-4 bg-amber-50 border-l-4 border-amber-500 text-amber-900 rounded-r space-y-1">
+              <div className="text-sm font-bold flex items-center gap-1.5">
+                🌧️ Okno pogodowe: Wstrzymaj nawadnianie (prognozowany deszcz)
+              </div>
+              <p className="text-sm text-amber-800 leading-relaxed">
+                {irrigation.justification}
+              </p>
             </div>
-            <p className="text-sm text-gov-text mt-1 leading-relaxed">
-              {irrigation.justification}
-            </p>
-          </div>
+          ) : (
+            <div className="gov-callout-info">
+              <div className="text-sm font-bold text-gov-navy">
+                Status: {irrigation.status}
+              </div>
+              <p className="text-sm text-gov-text mt-1 leading-relaxed">
+                {irrigation.justification}
+              </p>
+            </div>
+          )}
 
           <table className="gov-table border border-gov-border tabular-nums">
             <thead>
