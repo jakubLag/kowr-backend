@@ -4,16 +4,21 @@ Pobiera uziarnienie (piasek, pył, ił) oraz zawartość węgla organicznego (SO
 Wykorzystuje równania Saxtona & Rawlsa do estymacji Polowej Pojemności Wodnej (AWC).
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 import httpx
 from app.core.config import settings
 from app.services.science.saxton_rawls import calculate_saxton_rawls_awc
 
+_SOIL_CACHE: Dict[Tuple[float, float], Dict[str, Any]] = {}
+
 async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
     """
     Pobiera frakcje glebowe z SoilGrids v2.0 dla współrzędnych.
-    W przypadku niedostępności API stosuje parametry dominujące dla nizinnych gleb Polski (piasek gliniasty / gleba lekka).
+    Używa pamięci podręcznej (cache), aby nie odpytywać API wielokrotnie dla tego samego pola.
     """
+    cache_key = (round(lat, 3), round(lon, 3))
+    if cache_key in _SOIL_CACHE:
+        return _SOIL_CACHE[cache_key]
     params = {
         "lat": round(lat, 4),
         "lon": round(lon, 4),
@@ -67,7 +72,7 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
         layer_thickness_cm=30.0
     )
 
-    return {
+    result = {
         "sand_percent": round(sand_pct, 1),
         "clay_percent": round(clay_pct, 1),
         "silt_percent": round(silt_pct, 1),
@@ -75,4 +80,6 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
         "organic_matter_percent": round(soc_pct * 1.724, 2),
         **retention_data
     }
+    _SOIL_CACHE[cache_key] = result
+    return result
 

@@ -15,6 +15,20 @@ from app.core.config import settings
 from app.models.schemas import ParcelSearchResponse, ParcelGeometry, PointCoordinates
 from app.services.gis.coordinates import transform_2180_to_4326, transform_coordinates_list
 
+
+class ParcelNotFoundError(Exception):
+    """Wyjątek rzucany, gdy ULDK nie odnajdzie działki w podanym punkcie."""
+    pass
+
+
+class UldkServiceError(Exception):
+    """Wyjątek rzucany w przypadku błędu połączenia lub niedostępności usługi ULDK GUGiK."""
+    pass
+
+
+_parcel_point_cache: Dict[Tuple[float, float], ParcelSearchResponse] = {}
+_PARCEL_CACHE: Dict[str, ParcelSearchResponse] = {}
+
 def parse_teryt_components(teryt: str) -> Dict[str, str]:
     """
     Parsuje TERYT: WWPPGG_R.OOOO.NR_DZIAŁKI
@@ -93,7 +107,25 @@ def extract_wkt_from_response(raw_text: str) -> Optional[str]:
             return line
     return None
 
-_PARCEL_CACHE: Dict[str, ParcelSearchResponse] = {}
+def parse_wkt_2180_geometry(raw_wkt: str) -> Tuple[float, PointCoordinates, ParcelGeometry]:
+    """
+    Przetwarza geometrię WKT (EPSG:2180) na (area_ha, PointCoordinates, ParcelGeometry).
+    """
+    clean_wkt = raw_wkt.split(";")[-1].strip() if ";" in raw_wkt else raw_wkt.strip()
+    poly = wkt.loads(clean_wkt)
+    area_ha = round(poly.area / 10000.0, 2)
+    if area_ha < 0.01:
+        area_ha = 1.0
+
+    # Używamy representative_point zamiast centroidu (wymóg KOWR dla działek o nieregularnym kształcie)
+    rep_point = poly.representative_point()
+    center_lon, center_lat = transform_2180_to_4326(rep_point.x, rep_point.y)
+    raw_geojson = mapping(poly)
+    transformed_coords = transform_coordinates_list(raw_geojson["coordinates"])
+
+    center = PointCoordinates(lat=round(center_lat, 6), lon=round(center_lon, 6))
+    geometry = ParcelGeometry(type=raw_geojson["type"], coordinates=transformed_coords)
+    return area_ha, center, geometry
 
 async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     """
@@ -111,9 +143,9 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     }
 
     wkt_str: Optional[str] = None
-    geojson_data: Optional[Dict[str, Any]] = None
+    center_coords: Optional[PointCoordinates] = None
+    parcel_geometry: Optional[ParcelGeometry] = None
     area_ha = 2.5
-    center_lon, center_lat = 19.8, 52.3
 
     try:
         async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
@@ -136,31 +168,17 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
 
     if wkt_str:
         try:
-            poly = wkt.loads(wkt_str)
-            # W ULDK współrzędne są w układzie EPSG:2180 (metry).
-            # Obliczamy pole w m2 i zamieniamy na ha
-            area_m2 = poly.area
-            area_ha = round(area_m2 / 10000.0, 2)
-            if area_ha < 0.01:
-                area_ha = 1.0
-
-            # Używamy representative_point zamiast centroidu (wymóg KOWR dla działek w kształcie litery L)
-            rep_point = poly.representative_point()
-            # Przeliczamy współrzędne z EPSG:2180 na WGS84 (EPSG:4326)
-            center_lon, center_lat = transform_2180_to_4326(rep_point.x, rep_point.y)
-
-            # Konwersja geometrii
-            raw_geojson = mapping(poly)
-            transformed_coords = transform_coordinates_list(raw_geojson["coordinates"])
-            geojson_data = {
-                "type": raw_geojson["type"],
-                "coordinates": transformed_coords
-            }
+            clean_wkt = wkt_str.split(";")[-1].strip() if ";" in wkt_str else wkt_str.strip()
+            area_ha, center_coords, parcel_geometry = parse_wkt_2180_geometry(clean_wkt)
+            wkt_str = clean_wkt
         except Exception:
             wkt_str = None
+            parcel_geometry = None
 
-    if not geojson_data:
+    if not parcel_geometry or not center_coords:
         wkt_str, geojson_data, area_ha, (center_lon, center_lat) = generate_fallback_geometry(teryt)
+        center_coords = PointCoordinates(lat=round(center_lat, 6), lon=round(center_lon, 6))
+        parcel_geometry = ParcelGeometry(**geojson_data)
 
     response = ParcelSearchResponse(
         teryt=teryt,
@@ -170,9 +188,77 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
         precinct=metadata["precinct"],
         parcel_number=metadata["parcel_number"],
         area_ha=area_ha,
-        center=PointCoordinates(lat=round(center_lat, 6), lon=round(center_lon, 6)),
-        geometry=ParcelGeometry(**geojson_data),
+        center=center_coords,
+        geometry=parcel_geometry,
         wkt_2180=wkt_str
     )
     _PARCEL_CACHE[teryt] = response
     return response
+
+
+async def fetch_parcel_by_point_from_uldk(lat: float, lon: float) -> ParcelSearchResponse:
+    """
+    Pobiera działkę ewidencyjną z ULDK GUGiK na podstawie współrzędnych kliknięcia (WGS84).
+    """
+    cache_key = (round(lat, 5), round(lon, 5))
+    if cache_key in _parcel_point_cache:
+        return _parcel_point_cache[cache_key]
+
+    params = {
+        "request": "GetParcelByXY",
+        "xy": f"{lon},{lat},4326",
+        "result": "teryt,voivodeship,county,commune,precinct,geom_wkt",
+        "srid": "2180",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
+            resp = await client.get(settings.ULDK_BASE_URL, params=params)
+            if resp.status_code != 200:
+                raise UldkServiceError(f"Błąd odpowiedzi usługi ULDK: HTTP {resp.status_code}")
+    except UldkServiceError:
+        raise
+    except Exception as exc:
+        raise UldkServiceError(f"Błąd połączenia z usługą ULDK: {exc}") from exc
+
+    lines = [line.strip() for line in resp.text.strip().splitlines() if line.strip()]
+    if not lines or lines[0] != "0" or len(lines) < 2:
+        raise ParcelNotFoundError("Nie odnaleziono działki w podanym punkcie.")
+
+    parts = lines[1].split("|")
+    if len(parts) < 6:
+        raise ParcelNotFoundError("Niekompletna odpowiedź z usługi ULDK.")
+
+    teryt_raw = parts[0].strip()
+    voivodeship_raw = parts[1].strip()
+    county_raw = parts[2].strip()
+    commune_raw = parts[3].strip()
+    precinct_raw = parts[4].strip()
+    geom_wkt_raw = parts[5].strip()
+
+    if not teryt_raw or not geom_wkt_raw:
+        raise ParcelNotFoundError("Brak identyfikatora TERYT lub geometrii działki.")
+
+    clean_wkt = geom_wkt_raw.split(";")[-1].strip() if ";" in geom_wkt_raw else geom_wkt_raw
+    fallback_meta = parse_teryt_components(teryt_raw)
+
+    try:
+        area_ha, center_coords, parcel_geometry = parse_wkt_2180_geometry(clean_wkt)
+    except Exception as exc:
+        raise ParcelNotFoundError(f"Nieprawidłowa geometria WKT działki: {exc}") from exc
+
+    result = ParcelSearchResponse(
+        teryt=teryt_raw,
+        voivodeship=voivodeship_raw or fallback_meta["voivodeship"],
+        county=county_raw or fallback_meta["county"],
+        commune=commune_raw or fallback_meta["commune"],
+        precinct=precinct_raw or fallback_meta["precinct"],
+        parcel_number=fallback_meta["parcel_number"],
+        area_ha=area_ha,
+        center=center_coords,
+        geometry=parcel_geometry,
+        wkt_2180=clean_wkt,
+    )
+
+    _parcel_point_cache[cache_key] = result
+    return result
