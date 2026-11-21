@@ -14,15 +14,10 @@ def transform_2180_to_4326(x: float, y: float) -> Tuple[float, float]:
     """
     Konwertuje punkt z układu PUWG 1992 (EPSG:2180) do WGS84 (EPSG:4326).
     Zwraca (lon, lat) w stopniach dziesiętnych.
-    W PUWG 1992:
-      x = współrzędna północna (Northing, ok. 150000 - 850000 m)
-      y = współrzędna wschodnia (Easting, pas 500000 m południk 19E)
+    W WKT z ULDK współrzędne to x = Easting (np. 677000), y = Northing (np. 481000).
     """
     if HAS_PYPROJ:
-        # always_xy=True oznacza x=Easting (y w PUWG 1992), y=Northing (x w PUWG 1992)
-        # W polskim nazewnictwie: X to północ, Y to wschód.
-        # W standardzie GIS EPSG:2180: X to Northing, Y to Easting.
-        lon, lat = _transformer_2180_to_4326.transform(y, x)
+        lon, lat = _transformer_2180_to_4326.transform(x, y)
         return lon, lat
 
     # Fallback matematyczny oparty na elipsoidzie GRS80 i projekcji Gaussa-Krügera

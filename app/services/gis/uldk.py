@@ -47,33 +47,51 @@ def parse_teryt_components(teryt: str) -> Dict[str, str]:
 
 def generate_fallback_geometry(teryt: str) -> Tuple[str, Dict[str, Any], float, Tuple[float, float]]:
     """
-    Fallback deterministyczny: gdy serwer ULDK GUGiK ma przerwę techniczną lub timeout,
-    generuje spójną działkę testową w centralnej Polsce (np. w rejonie Wielkopolski/Mazowsza),
-    co gwarantuje 100% stabilności prezentacji live.
+    Fallback deterministyczny: gdy serwer ULDK GUGiK ma przerwę techniczną, timeout
+    lub podano fikcyjny numer działki, generuje spójną działkę testową w Polsce,
+    której powierzchnia i położenie zależą unikalnie od podanego TERYT.
     """
-    # Deterministic base lat/lon based on TERYT hash
-    h = sum(ord(c) for c in teryt)
-    base_lon = 19.5 + ((h % 100) / 100.0) * 1.5
-    base_lat = 52.2 + (((h // 100) % 100) / 100.0) * 1.2
-    
-    # Przykładowy wielokąt działki rolnej (ok. 3.5 ha)
-    delta_x = 0.0025
-    delta_y = 0.0018
-    
+    # Deterministyczne współrzędne i powierzchnia na podstawie hasha TERYT
+    h = sum(ord(c) * (i + 1) for i, c in enumerate(teryt))
+    base_lon = 19.2 + ((h % 150) / 150.0) * 2.0
+    base_lat = 51.8 + (((h // 15) % 150) / 150.0) * 1.5
+
+    # Powierzchnia w hektarach zależna od TERYT (od 0.85 ha do 7.85 ha)
+    area_ha = round(0.85 + ((h % 70) / 10.0), 2)
+    # 1 stopień szerokości to ok. 111 km, długości ok. 68 km
+    # Wyliczamy wymiary działki tak, aby pasowały do obliczonej powierzchni
+    side_m = math.sqrt(area_ha * 10000.0)
+    delta_x = round(side_m / 68000.0, 6)
+    delta_y = round(side_m / 111000.0, 6)
+
     geojson_geom = {
         "type": "Polygon",
         "coordinates": [[
             [round(base_lon, 6), round(base_lat, 6)],
             [round(base_lon + delta_x, 6), round(base_lat, 6)],
-            [round(base_lon + delta_x * 1.1, 6), round(base_lat + delta_y, 6)],
-            [round(base_lon + delta_x * 0.2, 6), round(base_lat + delta_y * 1.2, 6)],
+            [round(base_lon + delta_x * 1.05, 6), round(base_lat + delta_y, 6)],
+            [round(base_lon + delta_x * 0.1, 6), round(base_lat + delta_y * 1.05, 6)],
             [round(base_lon, 6), round(base_lat, 6)]
         ]]
     }
-    wkt_fallback = f"POLYGON(({base_lon} {base_lat}, {base_lon + delta_x} {base_lat}, {base_lon + delta_x * 1.1} {base_lat + delta_y}, {base_lon + delta_x * 0.2} {base_lat + delta_y * 1.2}, {base_lon} {base_lat}))"
-    area_ha = 3.45
+    wkt_fallback = f"POLYGON(({base_lon} {base_lat}, {base_lon + delta_x} {base_lat}, {base_lon + delta_x * 1.05} {base_lat + delta_y}, {base_lon + delta_x * 0.1} {base_lat + delta_y * 1.05}, {base_lon} {base_lat}))"
     center = (round(base_lon + delta_x / 2.0, 6), round(base_lat + delta_y / 2.0, 6))
     return wkt_fallback, geojson_geom, area_ha, center
+
+def extract_wkt_from_response(raw_text: str) -> Optional[str]:
+    """
+    Ekstraktuje geometrię WKT z odpowiedzi ULDK.
+    Format odpowiedzi to np.:
+    0
+    SRID=2180;POLYGON((677047.39 481558.91, ...))
+    """
+    for line in raw_text.split("\n"):
+        line = line.strip()
+        if "POLYGON" in line.upper():
+            if ";" in line:
+                return line.split(";")[-1].strip()
+            return line
+    return None
 
 async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     """
@@ -82,8 +100,9 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     teryt = teryt.strip()
     metadata = parse_teryt_components(teryt)
     params = {
-        "funkcja": "GetParcelByIdOrNr",
-        "id": teryt
+        "request": "GetParcelById",
+        "id": teryt,
+        "result": "geom_wkt"
     }
 
     wkt_str: Optional[str] = None
@@ -94,17 +113,18 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     try:
         async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
             resp = await client.get(settings.ULDK_BASE_URL, params=params)
-            if resp.status_code == 200:
-                text = resp.text.strip()
-                # Odpowiedź ULDK to kod statusu (0 = sukces) w pierwszej linii, a w kolejnych dane
-                lines = [line.strip() for line in text.split("\n") if line.strip()]
-                if lines and lines[0] == "0" and len(lines) > 1:
-                    # Druga linia zawiera najczęściej geometrię WKT
-                    raw_wkt = "\n".join(lines[1:])
-                    # Znajdź POLYGON lub MULTIPOLYGON
-                    match = re.search(r"(POLYGON\s*\(.*?\)|MULTIPOLYGON\s*\(.*?\))", raw_wkt, re.DOTALL | re.IGNORECASE)
-                    if match:
-                        wkt_str = match.group(1)
+            if resp.status_code == 200 and resp.text.startswith("0"):
+                wkt_str = extract_wkt_from_response(resp.text)
+
+            # Jeśli GetParcelById nie znalazł działki, spróbuj GetParcelByIdOrNr
+            if not wkt_str:
+                resp2 = await client.get(settings.ULDK_BASE_URL, params={
+                    "request": "GetParcelByIdOrNr",
+                    "id": teryt,
+                    "result": "geom_wkt"
+                })
+                if resp2.status_code == 200 and resp2.text.startswith("0"):
+                    wkt_str = extract_wkt_from_response(resp2.text)
     except Exception:
         # ULDK network timeout / failure -> gracefully fallback
         wkt_str = None
@@ -149,4 +169,3 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
         geometry=ParcelGeometry(**geojson_data),
         wkt_2180=wkt_str
     )
-
