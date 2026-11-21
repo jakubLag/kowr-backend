@@ -6,6 +6,8 @@ Zgodnie z wytycznymi KOWR wyznacza:
 - Identyfikację najbliższej rzeki i stan wód z państwowej sieci pomiarowej IMGW-PIB.
 """
 
+import os
+import json
 import math
 import asyncio
 import logging
@@ -18,6 +20,14 @@ logger = logging.getLogger("terrain")
 
 _TERRAIN_CACHE: Dict[Tuple[float, float, Optional[float]], Dict[str, Any]] = {}
 _IMGW_STATIONS_CACHE: List[Dict[str, Any]] = []
+
+IMGW_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "imgw_stations.json")
+
+OVERPASS_MIRRORS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+]
 
 
 async def fetch_elevation_point(client: httpx.AsyncClient, northing: float, easting: float) -> Optional[float]:
@@ -97,77 +107,83 @@ async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: f
 
 
 async def get_imgw_stations(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
-    """Pobiera i buforuje w pamięci listę państwowych stacji hydrologicznych IMGW-PIB."""
+    """
+    Pobiera i buforuje w pamięci listę państwowych stacji hydrologicznych IMGW-PIB.
+    W pierwszej kolejności czyta lokalną bazę JSON (czas odpowiedzi < 1 ms),
+    a w przypadku jej braku odpytuje API IMGW z limitem 2.0s.
+    """
     global _IMGW_STATIONS_CACHE
     if _IMGW_STATIONS_CACHE:
         return _IMGW_STATIONS_CACHE
+
+    if os.path.exists(IMGW_LOCAL_PATH):
+        try:
+            with open(IMGW_LOCAL_PATH, "r", encoding="utf-8") as f:
+                _IMGW_STATIONS_CACHE = json.load(f)
+                if _IMGW_STATIONS_CACHE:
+                    logger.info(f"[IMGW Hydro] Załadowano {_IMGW_STATIONS_CACHE.__len__()} stacji z lokalnej bazy.")
+                    return _IMGW_STATIONS_CACHE
+        except Exception as e:
+            logger.debug(f"[IMGW Hydro] Błąd odczytu lokalnej bazy stacji: {e}")
+
     try:
-        resp = await client.get(settings.IMGW_HYDRO_URL, timeout=4.0)
+        resp = await client.get(settings.IMGW_HYDRO_URL, timeout=2.0)
         if resp.status_code == 200:
             _IMGW_STATIONS_CACHE = resp.json()
-            logger.info(f"[IMGW Hydro] Załadowano {len(_IMGW_STATIONS_CACHE)} stacji hydrologicznych.")
             return _IMGW_STATIONS_CACHE
     except Exception as e:
-        logger.warning(f"[IMGW Hydro] Błąd pobierania stacji: {e}")
+        logger.debug(f"[IMGW Hydro] Błąd pobierania stacji z API: {e}")
     return []
 
 
-async def scan_for_ditch_along_perimeter(
+async def scan_for_ditch_overpass(
     client: httpx.AsyncClient,
     lat: float,
     lon: float
-) -> Optional[float]:
+) -> Tuple[Optional[float], Optional[List[List[float]]]]:
     """
-    Skanuje obrzeża działki (promienie 25m, 60m, 120m w 4 kierunkach)
-    w poszukiwaniu rowów melioracyjnych na miedzach.
-    Zwraca najkrótszy wykryty dystans w metrach lub None jeśli brak rowu w buforze.
+    Skanuje obrzeża działki (bufor 500 m) w poszukiwaniu rowów melioracyjnych i cieków w OpenStreetMap (Overpass API).
+    Zwraca krotkę: (najkrótszy dystans w metrach, geometria_najbliższego_rowu).
     """
-    test_radii_m = [25.0, 60.0, 300.0]
-    # Wektorowe przesunięcia: N, S, E, W
-    directions = [
-        (1.0, 0.0),   # Północ
-        (-1.0, 0.0),  # Południe
-        (0.0, 1.0),   # Wschód
-        (0.0, -1.0)   # Zachód
-    ]
+    query = f"""[out:json][timeout:2];
+(
+  way["waterway"~"ditch|drain|canal|stream"](around:500,{lat},{lon});
+);
+out geom;"""
 
-    for radius_m in test_radii_m:
-        dlat_deg = radius_m / 111000.0
-        dlon_deg = radius_m / 68000.0
+    for mirror_url in OVERPASS_MIRRORS:
+        try:
+            resp = await client.post(
+                mirror_url,
+                data={"data": query},
+                headers={"User-Agent": "KOWR-WaterApp/1.0"},
+                timeout=2.0
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                elements = data.get("elements", [])
+                if not elements:
+                    return None, None
 
-        for dir_lat, dir_lon in directions:
-            sample_lat = lat + (dir_lat * dlat_deg)
-            sample_lon = lon + (dir_lon * dlon_deg)
-            delta = 0.002
+                min_dist = float("inf")
+                best_geom = None
+                for el in elements:
+                    geom = el.get("geometry", [])
+                    for pt in geom:
+                        dlat = (pt["lat"] - lat) * 111000.0
+                        dlon = (pt["lon"] - lon) * (111000.0 * max(0.2, math.cos(math.radians(lat))))
+                        dist = math.sqrt(dlat * dlat + dlon * dlon)
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_geom = [[p["lat"], p["lon"]] for p in geom]
 
-            wms_params = {
-                "SERVICE": "WMS",
-                "VERSION": "1.3.0",
-                "REQUEST": "GetFeatureInfo",
-                "LAYERS": "HY.Network",
-                "QUERY_LAYERS": "HY.Network",
-                "CRS": "EPSG:4326",
-                "BBOX": f"{sample_lat - delta},{sample_lon - delta},{sample_lat + delta},{sample_lon + delta}",
-                "WIDTH": "101",
-                "HEIGHT": "101",
-                "I": "50",
-                "J": "50",
-                "INFO_FORMAT": "application/json"
-            }
-            try:
-                wms_resp = await client.get(
-                    settings.HYDROPORTAL_WMS_URL,
-                    params=wms_params,
-                    timeout=1.5
-                )
-                if wms_resp.status_code == 200:
-                    data = wms_resp.json()
-                    if data.get("features"):
-                        return round(radius_m, 1)
-            except Exception:
-                pass
+                if min_dist <= 500.0 and best_geom:
+                    return round(min_dist, 1), best_geom
+                return None, None
+        except Exception:
+            continue
 
-    return None
+    return None, None
 
 
 async def fetch_terrain_and_hydro(
@@ -230,22 +246,24 @@ async def fetch_terrain_and_hydro(
                         pass
 
         # 3. Odległość do rowu melioracyjnego
+        ditch_geometry = None
         if ditch_distance_m is not None:
-            # Priorytet 1: Użytkownik/rolnik wskazał rów obok działki
+            # Priorytet 1: Użytkownik/rolnik wskazał rów obok działki (z mapy lub suwaka)
             final_ditch_dist = max(0.0, round(float(ditch_distance_m), 1))
         else:
-            # Priorytet 2: Skanowanie obrzeży działki w buforze 500 m
-            scanned_dist = await scan_for_ditch_along_perimeter(client, lat, lon)
+            # Priorytet 2: Skanowanie wektorów cieków i rowów w promieniu 500 m (OpenStreetMap / BDOT10k)
+            scanned_dist, ditch_geom = await scan_for_ditch_overpass(client, lat, lon)
             if scanned_dist is not None:
                 final_ditch_dist = scanned_dist
+                ditch_geometry = ditch_geom
             else:
-                # W buforze 500m nie znaleziono rowu
                 final_ditch_dist = None
 
     result = {
         "slope_percent": slope_percent,
         "is_slope_fallback": is_slope_fallback,
         "distance_to_ditch_m": final_ditch_dist,
+        "ditch_geometry": ditch_geometry,
         "nearest_river": nearest_river,
         "river_distance_m": river_distance_m,
         "water_level_cm": water_level_cm
