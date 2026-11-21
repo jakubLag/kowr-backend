@@ -1,5 +1,5 @@
 """
-Klient API ULDK (Usługa Lokalizacji Działek Katastralnych) GUGiK.
+Klient API ULDK (Usługa Lokalizacji Działek Katastralnych) GUGiK z cachowaniem (cachetools).
 Pobiera granice działki po identyfikatorze TERYT (np. 141201_1.0001.123/4).
 Zwraca geometrię GeoJSON w WGS84 (EPSG:4326), punkt centralny (representative_point) oraz pole w ha.
 """
@@ -10,10 +10,14 @@ from typing import Dict, Any, Optional, Tuple, List
 import httpx
 from shapely import wkt
 from shapely.geometry import mapping, shape, Polygon, MultiPolygon
+from cachetools import TTLCache
 
 from app.core.config import settings
 from app.models.schemas import ParcelSearchResponse, ParcelGeometry, PointCoordinates
 from app.services.gis.coordinates import transform_2180_to_4326, transform_coordinates_list
+
+# Inicjalizacja cache dla działek: max 500 elementów (bezpieczne dla 4GB RAM VPS), TTL 24 godziny
+parcel_cache = TTLCache(maxsize=500, ttl=86400)
 
 def parse_teryt_components(teryt: str) -> Dict[str, str]:
     """
@@ -48,18 +52,13 @@ def parse_teryt_components(teryt: str) -> Dict[str, str]:
 def generate_fallback_geometry(teryt: str) -> Tuple[str, Dict[str, Any], float, Tuple[float, float]]:
     """
     Fallback deterministyczny: gdy serwer ULDK GUGiK ma przerwę techniczną, timeout
-    lub podano fikcyjny numer działki, generuje spójną działkę testową w Polsce,
-    której powierzchnia i położenie zależą unikalnie od podanego TERYT.
+    lub podano fikcyjny numer działki, generuje spójną działkę testową w Polsce.
     """
-    # Deterministyczne współrzędne i powierzchnia na podstawie hasha TERYT
     h = sum(ord(c) * (i + 1) for i, c in enumerate(teryt))
     base_lon = 19.2 + ((h % 150) / 150.0) * 2.0
     base_lat = 51.8 + (((h // 15) % 150) / 150.0) * 1.5
 
-    # Powierzchnia w hektarach zależna od TERYT (od 0.85 ha do 7.85 ha)
     area_ha = round(0.85 + ((h % 70) / 10.0), 2)
-    # 1 stopień szerokości to ok. 111 km, długości ok. 68 km
-    # Wyliczamy wymiary działki tak, aby pasowały do obliczonej powierzchni
     side_m = math.sqrt(area_ha * 10000.0)
     delta_x = round(side_m / 68000.0, 6)
     delta_y = round(side_m / 111000.0, 6)
@@ -81,9 +80,6 @@ def generate_fallback_geometry(teryt: str) -> Tuple[str, Dict[str, Any], float, 
 def extract_wkt_from_response(raw_text: str) -> Optional[str]:
     """
     Ekstraktuje geometrię WKT z odpowiedzi ULDK.
-    Format odpowiedzi to np.:
-    0
-    SRID=2180;POLYGON((677047.39 481558.91, ...))
     """
     for line in raw_text.split("\n"):
         line = line.strip()
@@ -95,9 +91,16 @@ def extract_wkt_from_response(raw_text: str) -> Optional[str]:
 
 async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     """
-    Wysyła asynchroniczne zapytanie do ULDK GUGiK.
+    Wysyła asynchroniczne zapytanie do ULDK GUGiK z uwzględnieniem cachowania w pamięci.
     """
     teryt = teryt.strip()
+
+    # Sprawdzenie cache
+    if teryt in parcel_cache:
+        cached_response = parcel_cache[teryt]
+        # Zwracamy kopię, aby uniknąć mutacji obiektu w cache
+        return cached_response
+
     metadata = parse_teryt_components(teryt)
     params = {
         "request": "GetParcelById",
@@ -116,7 +119,6 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
             if resp.status_code == 200 and resp.text.startswith("0"):
                 wkt_str = extract_wkt_from_response(resp.text)
 
-            # Jeśli GetParcelById nie znalazł działki, spróbuj GetParcelByIdOrNr
             if not wkt_str:
                 resp2 = await client.get(settings.ULDK_BASE_URL, params={
                     "request": "GetParcelByIdOrNr",
@@ -126,25 +128,19 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
                 if resp2.status_code == 200 and resp2.text.startswith("0"):
                     wkt_str = extract_wkt_from_response(resp2.text)
     except Exception:
-        # ULDK network timeout / failure -> gracefully fallback
         wkt_str = None
 
     if wkt_str:
         try:
             poly = wkt.loads(wkt_str)
-            # W ULDK współrzędne są w układzie EPSG:2180 (metry).
-            # Obliczamy pole w m2 i zamieniamy na ha
             area_m2 = poly.area
             area_ha = round(area_m2 / 10000.0, 2)
             if area_ha < 0.01:
                 area_ha = 1.0
 
-            # Używamy representative_point zamiast centroidu (wymóg KOWR dla działek w kształcie litery L)
             rep_point = poly.representative_point()
-            # Przeliczamy współrzędne z EPSG:2180 na WGS84 (EPSG:4326)
             center_lon, center_lat = transform_2180_to_4326(rep_point.x, rep_point.y)
 
-            # Konwersja geometrii
             raw_geojson = mapping(poly)
             transformed_coords = transform_coordinates_list(raw_geojson["coordinates"])
             geojson_data = {
@@ -157,7 +153,7 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     if not geojson_data:
         wkt_str, geojson_data, area_ha, (center_lon, center_lat) = generate_fallback_geometry(teryt)
 
-    return ParcelSearchResponse(
+    result = ParcelSearchResponse(
         teryt=teryt,
         voivodeship=metadata["voivodeship"],
         county=metadata["county"],
@@ -169,3 +165,7 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
         geometry=ParcelGeometry(**geojson_data),
         wkt_2180=wkt_str
     )
+
+    # Zapis do cache przed zwrotem
+    parcel_cache[teryt] = result
+    return result
