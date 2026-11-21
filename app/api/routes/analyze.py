@@ -59,7 +59,7 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     # 2. Równoległe pobranie pozostałych 4 źródeł danych z return_exceptions=True (Graceful Degradation)
     weather_task = fetch_weather_data(lat, lon, request.target_date)
-    sentinel_task = fetch_sentinel_indices(lat, lon, request.target_date)
+    sentinel_task = fetch_sentinel_indices(lat, lon, request.target_date, crop_name=request.crop)
     soil_task = fetch_soil_properties(lat, lon)
     terrain_task = fetch_terrain_and_hydro(lat, lon)
 

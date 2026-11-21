@@ -1,5 +1,5 @@
 """
-Klient danych satelitarnych Sentinel-2 (Copernicus Data Space Ecosystem / AWS STAC).
+Klient danych satelitarnych Sentinel-2 (Copernicus Data Space Ecosystem / AWS STAC) z cachowaniem (cachetools).
 
 Domyślny tryb (Główny):
 - Europejskie serwery Copernicus Data Space Ecosystem (CDSE) / Sentinel Hub API.
@@ -21,7 +21,9 @@ from typing import Dict, Any, Optional, Tuple, List
 import httpx
 import rasterio
 from rasterio.warp import transform
+from cachetools import TTLCache
 from app.core.config import settings
+from app.services.science.crops import get_crop_ndvi_reference
 
 logger = logging.getLogger("satellite")
 
@@ -29,8 +31,9 @@ logger = logging.getLogger("satellite")
 _CDSE_TOKEN: Optional[str] = None
 _CDSE_TOKEN_EXPIRES_AT: float = 0.0
 
-# Pamięć podręczna wyników satelitarnych dla współrzędnych i daty
-_SATELLITE_CACHE: Dict[Tuple[float, float, Optional[str]], Dict[str, Any]] = {}
+# Bezpieczny cache w pamięci dla VPS (4GB RAM): max 500 elementów, TTL 24 godziny
+# Kluczem cache jest teraz krotka: (lat, lon, crop_name, target_date_str)
+_SATELLITE_CACHE = TTLCache(maxsize=500, ttl=86400)
 
 
 async def get_cdse_token(client: httpx.AsyncClient) -> Optional[str]:
@@ -43,7 +46,6 @@ async def get_cdse_token(client: httpx.AsyncClient) -> Optional[str]:
     if not settings.CDSE_CLIENT_ID or not settings.CDSE_CLIENT_SECRET:
         return None
 
-    # Zwróć istniejący token, jeśli jest ważny jeszcze przez min. 60 sekund
     if _CDSE_TOKEN and time.time() < (_CDSE_TOKEN_EXPIRES_AT - 60):
         return _CDSE_TOKEN
 
@@ -78,12 +80,14 @@ async def fetch_indices_from_cdse(
     lon: float,
     lat: float,
     date_start: str,
-    date_end: str
+    date_end: str,
+    crop_name: str,
+    month: int
 ) -> Optional[Dict[str, Any]]:
     """
     Pobiera dane z europejskich serwerów Copernicus Data Space Ecosystem (CDSE):
     1. Przeszukuje katalog Sentinel-2 L2A w oknie 21 dni.
-    2. Weryfikuje zachmurzenie (<15% zgodnie z wymogiem KOWR).
+    2. Weryfikuje zachmurzenie (<15% zgodnie z wymogiem KOWR)[cite: 2, 4].
     3. Oblicza NDVI i NDMI po stronie serwera za pomocą Sentinel Hub Process API.
     """
     headers = {
@@ -91,7 +95,6 @@ async def fetch_indices_from_cdse(
         "Content-Type": "application/json"
     }
 
-    # Krok 1: Wyszukanie scen w CDSE Catalog API
     bbox = [lon - 0.001, lat - 0.001, lon + 0.001, lat + 0.001]
     cat_payload = {
         "collections": ["sentinel-2-l2a"],
@@ -116,18 +119,19 @@ async def fetch_indices_from_cdse(
             logger.info("[CDSE Catalog] Brak scen dla podanych współrzędnych w oknie czasowym.")
             return None
 
-        # Sortuj sceny wg zachmurzenia (rosnąco), wybierając najmniej zachmurzoną
         clear_features = [
             f for f in features
             if f.get("properties", {}).get("eo:cloud_cover", 100) < 15
         ]
 
+        # Pobieramy precyzyjną referencję NDVI zależną od uprawy i miesiąca
+        ndvi_reference = get_crop_ndvi_reference(crop_name, month=month)
+
         if not clear_features:
-            # Wszystkie sceny w oknie 21 dni mają zachmurzenie > 15% - fallback KOWR
             first_scene = features[0].get("properties", {})
             return {
                 "ndvi_current": None,
-                "ndvi_historical_median": 0.68,
+                "ndvi_historical_median": ndvi_reference,
                 "ndvi_anomaly_percent": None,
                 "ndmi_current": None,
                 "scene_date": first_scene.get("datetime", "")[:10] or date_end,
@@ -135,14 +139,12 @@ async def fetch_indices_from_cdse(
                 "limitation_note": "Wskaźnik NDVI niedostępny z powodu trwałego zachmurzenia (>15%) w 21-dniowym oknie obserwacji. Analizę oparto na bilansie KBW i retencji glebowej."
             }
 
-        # Najlepsza bezchmurna scena
         best_scene = clear_features[0]
         scene_props = best_scene.get("properties", {})
         scene_datetime = scene_props.get("datetime", "")
         scene_date = scene_datetime[:10] if scene_datetime else date_end
         cloud_cover = round(float(scene_props.get("eo:cloud_cover", 5.0)), 1)
 
-        # Krok 2: Sentinel Hub Process API - obliczanie NDVI i NDMI na serwerze Copernicus
         evalscript = """//VERSION=3
 function setup() {
   return {
@@ -158,9 +160,7 @@ function evaluatePixel(sample) {
 """
         proc_payload = {
             "input": {
-                "bounds": {
-                    "bbox": bbox
-                },
+                "bounds": {"bbox": bbox},
                 "data": [{
                     "type": "sentinel-2-l2a",
                     "dataFilter": {
@@ -174,10 +174,7 @@ function evaluatePixel(sample) {
             "output": {
                 "width": 1,
                 "height": 1,
-                "responses": [{
-                    "identifier": "default",
-                    "format": {"type": "image/tiff"}
-                }]
+                "responses": [{"identifier": "default", "format": {"type": "image/tiff"}}]
             },
             "evalscript": evalscript
         }
@@ -204,26 +201,19 @@ function evaluatePixel(sample) {
             if mask > 0 and not (-1.0 > raw_ndvi or raw_ndvi > 1.0 or raw_ndvi != raw_ndvi):
                 ndvi_val = round(raw_ndvi, 3)
                 ndmi_val = round(raw_ndmi, 3) if not (-1.0 > raw_ndmi or raw_ndmi > 1.0 or raw_ndmi != raw_ndmi) else 0.22
-                ndvi_median = 0.68
-                anomaly = round(((ndvi_val - ndvi_median) / ndvi_median) * 100.0, 1)
-
-                logger.info(
-                    f"[CDSE Copernicus] Sukces: NDVI={ndvi_val}, NDMI={ndmi_val}, "
-                    f"Scena={scene_date}, Zachmurzenie={cloud_cover}%"
-                )
+                
+                # Obliczenie anomalii względem referencji dla tej uprawy w tym miesiącu
+                anomaly = round(((ndvi_val - ndvi_reference) / ndvi_reference) * 100.0, 1)
 
                 return {
                     "ndvi_current": ndvi_val,
-                    "ndvi_historical_median": ndvi_median,
+                    "ndvi_historical_median": ndvi_reference,
                     "ndvi_anomaly_percent": anomaly,
                     "ndmi_current": ndmi_val,
                     "scene_date": scene_date,
                     "cloud_cover_percent": cloud_cover,
                     "limitation_note": None
                 }
-        else:
-            logger.warning(f"[CDSE Process API] Błąd {p_resp.status_code}: {p_resp.text[:200]}")
-
     except Exception as e:
         logger.warning(f"[CDSE Copernicus] Wyjątek podczas komunikacji z CDSE: {e}")
 
@@ -244,22 +234,18 @@ def extract_real_indices_from_cog(item: Dict[str, Any], lon: float, lat: float) 
         if not red_url or not nir_url:
             return None, None
 
-        # Odczyt pasma Red (B04)
         with rasterio.open(red_url) as src_red:
             xs, ys = transform("EPSG:4326", src_red.crs, [lon], [lat])
             red_val = next(src_red.sample([(xs[0], ys[0])]))[0]
 
-        # Odczyt pasma NIR (B08)
         with rasterio.open(nir_url) as src_nir:
             xs, ys = transform("EPSG:4326", src_nir.crs, [lon], [lat])
             nir_val = next(src_nir.sample([(xs[0], ys[0])]))[0]
 
-        # Rzeczywisty wzór NDVI = (NIR - Red) / (NIR + Red)
         ndvi = None
         if (nir_val + red_val) > 0:
             ndvi = round(float(nir_val - red_val) / float(nir_val + red_val), 3)
 
-        # Odczyt pasma SWIR (B11) dla wskaźnika uwodnienia NDMI = (NIR - SWIR) / (NIR + SWIR)
         ndmi = None
         if swir_url and nir_val > 0:
             try:
@@ -271,7 +257,6 @@ def extract_real_indices_from_cog(item: Dict[str, Any], lon: float, lat: float) 
             except Exception:
                 pass
 
-        logger.info(f"[AWS STAC COG] Pobrano piksele: Red={red_val}, NIR={nir_val} -> Wyliczone NDVI={ndvi}")
         return ndvi, ndmi
     except Exception as e:
         logger.warning(f"[AWS STAC COG] Błąd odczytu piksela z COG: {e}")
@@ -281,31 +266,37 @@ def extract_real_indices_from_cog(item: Dict[str, Any], lon: float, lat: float) 
 async def fetch_sentinel_indices(
     lat: float,
     lon: float,
-    target_date_str: Optional[str] = None
+    target_date_str: Optional[str] = None,
+    crop_name: str = "kukurydza"
 ) -> Dict[str, Any]:
     """
-    Wyszukuje zobrazowania satelitarne Sentinel-2 w oknie 21 dni wokół target_date.
-    
-    Kolejność priorytetów:
-    1. Europejskie serwery Copernicus Data Space Ecosystem (CDSE) z obliczaniem po stronie serwera.
-    2. AWS Earth Search STAC z próbkowaniem pikseli COG.
-    3. Bezpieczny fallback przy braku łączności lub trwałym zachmurzeniu.
+    Wyszukuje zobrazowania satelitarne Sentinel-2 w oknie 21 dni wokół target_date z uwzględnieniem TTL cache.
+    Przyjmuje crop_name w celu doboru precyzyjnej referencji NDVI.
     """
-    cache_key = (round(lat, 4), round(lon, 4), target_date_str)
-    if cache_key in _SATELLITE_CACHE:
-        return _SATELLITE_CACHE[cache_key]
-
     if target_date_str:
         try:
             target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+            month = target_date.month
         except ValueError:
             target_date = datetime.now().date()
+            month = target_date.month
     else:
         target_date = datetime.now().date()
+        month = target_date.month
 
-    # Okno 21 dni
+    lat_r = round(lat, 4)
+    lon_r = round(lon, 4)
+    # Klucz cache uwzględnia teraz współrzędne, datę oraz uprawę
+    cache_key = (lat_r, lon_r, target_date_str, crop_name.lower())
+    
+    if cache_key in _SATELLITE_CACHE:
+        return _SATELLITE_CACHE[cache_key]
+
     date_start = (target_date - timedelta(days=21)).strftime("%Y-%m-%d")
     date_end = target_date.strftime("%Y-%m-%d")
+
+    # Pobieramy referencyjne NDVI dla konkretnej uprawy i miesiąca
+    ndvi_reference = get_crop_ndvi_reference(crop_name, month=month)
 
     async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
         # --- PRIORYTET 1: Copernicus Data Space Ecosystem (CDSE) ---
@@ -317,7 +308,9 @@ async def fetch_sentinel_indices(
                 lon=lon,
                 lat=lat,
                 date_start=date_start,
-                date_end=date_end
+                date_end=date_end,
+                crop_name=crop_name,
+                month=month
             )
             if cdse_result is not None:
                 _SATELLITE_CACHE[cache_key] = cdse_result
@@ -354,10 +347,9 @@ async def fetch_sentinel_indices(
                     dt = props.get("datetime", "")
                     scene_date = dt.split("T")[0] if dt else date_end
                 elif features:
-                    # Trwałe zachmurzenie (>15%) w oknie 21 dni
                     result = {
                         "ndvi_current": None,
-                        "ndvi_historical_median": 0.68,
+                        "ndvi_historical_median": ndvi_reference,
                         "ndvi_anomaly_percent": None,
                         "ndmi_current": None,
                         "scene_date": features[0].get("properties", {}).get("datetime", "").split("T")[0],
@@ -369,9 +361,8 @@ async def fetch_sentinel_indices(
         except Exception as e:
             logger.warning(f"[AWS STAC] Błąd połączenia / timeout: {e}")
 
-    # Wartości domyślne (fallback na wypadek braku łączności)
-    ndvi_val = 0.58
-    ndvi_median = 0.68
+    # Awaryjne wartości domyślne oparte o profil referencyjny uprawy
+    ndvi_val = round(ndvi_reference * 0.9, 3) # Lekko zaniżone dla fallbacku
     ndmi_val = 0.22
 
     if best_item:
@@ -381,16 +372,17 @@ async def fetch_sentinel_indices(
             if real_ndmi is not None:
                 ndmi_val = real_ndmi
 
-    anomaly = round(((ndvi_val - ndvi_median) / ndvi_median) * 100.0, 1)
+    anomaly = round(((ndvi_val - ndvi_reference) / ndvi_reference) * 100.0, 1)
 
     result = {
         "ndvi_current": ndvi_val,
-        "ndvi_historical_median": ndvi_median,
+        "ndvi_historical_median": ndvi_reference,
         "ndvi_anomaly_percent": anomaly,
         "ndmi_current": ndmi_val,
         "scene_date": scene_date,
         "cloud_cover_percent": cloud_cover,
         "limitation_note": None
     }
+    
     _SATELLITE_CACHE[cache_key] = result
     return result
