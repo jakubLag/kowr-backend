@@ -1,20 +1,23 @@
 """
-Klient API ULDK (Usługa Lokalizacji Działek Katastralnych) GUGiK.
-Pobiera granice działki po identyfikatorze TERYT (np. 141201_1.0001.123/4).
+Klient API ULDK (Usługa Lokalizacji Działek Katastralnych) GUGiK z cachowaniem (cachetools).
+Pobiera granice działki po identyfikatorze TERYT (np. 141201_1.0001.123/4) lub współrzędnych geograficznych.
 Zwraca geometrię GeoJSON w WGS84 (EPSG:4326), punkt centralny (representative_point) oraz pole w ha.
 """
 
-import re
 import math
 from typing import Dict, Any, Optional, Tuple, List
 import httpx
 from shapely import wkt
 from shapely.geometry import mapping, shape, Polygon, MultiPolygon
+from cachetools import TTLCache
 
 from app.core.config import settings
 from app.models.schemas import ParcelSearchResponse, ParcelGeometry, PointCoordinates
 from app.services.gis.coordinates import transform_2180_to_4326, transform_coordinates_list
 
+# Inicjalizacja cache dla działek: max 500 elementów (bezpieczne dla 4GB RAM VPS), TTL 24 godziny
+parcel_cache = TTLCache(maxsize=500, ttl=86400)
+_parcel_point_cache = parcel_cache
 
 class ParcelNotFoundError(Exception):
     """Wyjątek rzucany, gdy ULDK nie odnajdzie działki w podanym punkcie."""
@@ -25,9 +28,6 @@ class UldkServiceError(Exception):
     """Wyjątek rzucany w przypadku błędu połączenia lub niedostępności usługi ULDK GUGiK."""
     pass
 
-
-_parcel_point_cache: Dict[Tuple[float, float], ParcelSearchResponse] = {}
-_PARCEL_CACHE: Dict[str, ParcelSearchResponse] = {}
 
 def parse_teryt_components(teryt: str) -> Dict[str, str]:
     """
@@ -149,9 +149,6 @@ def generate_fallback_geometry(teryt: str) -> Tuple[str, Dict[str, Any], float, 
 def extract_wkt_from_response(raw_text: str) -> Optional[str]:
     """
     Ekstraktuje geometrię WKT z odpowiedzi ULDK.
-    Format odpowiedzi to np.:
-    0
-    SRID=2180;POLYGON((677047.39 481558.91, ...))
     """
     for line in raw_text.split("\n"):
         line = line.strip()
@@ -183,12 +180,15 @@ def parse_wkt_2180_geometry(raw_wkt: str) -> Tuple[float, PointCoordinates, Parc
 
 async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     """
-    Wysyła asynchroniczne zapytanie do ULDK GUGiK.
-    Wykorzystuje pamięć podręczną (cache).
+    Wysyła asynchroniczne zapytanie do ULDK GUGiK po identyfikatorze TERYT.
+    Wykorzystuje pamięć podręczną (TTLCache).
     """
     teryt = teryt.strip()
-    if teryt in _PARCEL_CACHE:
-        return _PARCEL_CACHE[teryt]
+
+    # Sprawdzenie cache
+    if teryt in parcel_cache:
+        return parcel_cache[teryt]
+
     metadata = parse_teryt_components(teryt)
     params = {
         "request": "GetParcelById",
@@ -211,7 +211,6 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
                 if raw.startswith("0") and "POINT(90 90)" not in raw and "blocked for abuse" not in raw:
                     wkt_str = extract_wkt_from_response(raw)
 
-            # Jeśli GetParcelById nie znalazł działki, spróbuj GetParcelByIdOrNr
             if not wkt_str:
                 resp2 = await client.get(settings.ULDK_BASE_URL, params={
                     "request": "GetParcelByIdOrNr",
@@ -223,7 +222,6 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
                     if raw2.startswith("0") and "POINT(90 90)" not in raw2 and "blocked for abuse" not in raw2:
                         wkt_str = extract_wkt_from_response(raw2)
     except Exception:
-        # ULDK network timeout / failure -> gracefully fallback
         wkt_str = None
 
     if wkt_str:
@@ -254,17 +252,23 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
         wkt_2180=wkt_str,
         is_fallback=is_fallback
     )
-    _PARCEL_CACHE[teryt] = response
+    
+    # Zapis do cache TTL
+    parcel_cache[teryt] = response
     return response
 
 
 async def fetch_parcel_by_point_from_uldk(lat: float, lon: float) -> ParcelSearchResponse:
     """
     Pobiera działkę ewidencyjną z ULDK GUGiK na podstawie współrzędnych kliknięcia (WGS84).
+    Wykorzystuje pamięć podręczną (TTLCache) opartą na zaokrąglonych współrzędnych.
     """
-    cache_key = (round(lat, 5), round(lon, 5))
-    if cache_key in _parcel_point_cache:
-        return _parcel_point_cache[cache_key]
+    lat_r = round(lat, 5)
+    lon_r = round(lon, 5)
+    cache_key = f"pt_{lat_r}_{lon_r}"
+    
+    if cache_key in parcel_cache:
+        return parcel_cache[cache_key]
 
     params = {
         "request": "GetParcelByXY",
@@ -322,5 +326,7 @@ async def fetch_parcel_by_point_from_uldk(lat: float, lon: float) -> ParcelSearc
         wkt_2180=clean_wkt,
     )
 
-    _parcel_point_cache[cache_key] = result
+    # Zapisz w cache pod kluczem współrzędnych oraz pod TERYT, żeby uniknąć duplikatów
+    parcel_cache[cache_key] = result
+    parcel_cache[teryt_raw] = result
     return result
