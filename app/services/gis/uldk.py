@@ -4,6 +4,7 @@ Pobiera granice działki po identyfikatorze TERYT (np. 141201_1.0001.123/4).
 Zwraca geometrię GeoJSON w WGS84 (EPSG:4326), punkt centralny (representative_point) oraz pole w ha.
 """
 
+import re
 import math
 from typing import Dict, Any, Optional, Tuple, List
 import httpx
@@ -88,12 +89,9 @@ def extract_wkt_from_response(raw_text: str) -> Optional[str]:
             return line
     return None
 
-_PARCEL_CACHE: Dict[str, ParcelSearchResponse] = {}
-
 async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     """
-    Wysyła asynchroniczne zapytanie do ULDK GUGiK.
-    Wykorzystuje pamięć podręczną (cache).
+    Wysyła asynchroniczne zapytanie do ULDK GUGiK z uwzględnieniem cachowania w pamięci.
     """
     teryt = teryt.strip()
 
@@ -155,7 +153,7 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     if not geojson_data:
         wkt_str, geojson_data, area_ha, (center_lon, center_lat) = generate_fallback_geometry(teryt)
 
-    response = ParcelSearchResponse(
+    result = ParcelSearchResponse(
         teryt=teryt,
         voivodeship=metadata["voivodeship"],
         county=metadata["county"],
@@ -167,5 +165,7 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
         geometry=ParcelGeometry(**geojson_data),
         wkt_2180=wkt_str
     )
-    _PARCEL_CACHE[teryt] = response
-    return response
+
+    # Zapis do cache przed zwrotem
+    parcel_cache[teryt] = result
+    return result
