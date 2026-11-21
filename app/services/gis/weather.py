@@ -4,6 +4,7 @@ Pobiera sumy opadów (P), temperaturę średnią, prędkość wiatru oraz ewapot
 dla punktu działki z ostatnich 60 dni oraz buduje długoterminową 60-dniową prognozę agrometeorologiczną (6 dekad po 10 dni).
 """
 
+import math
 import logging
 from datetime import datetime, timedelta, date
 from typing import Dict, Any, Optional, List
@@ -32,35 +33,48 @@ MONTHLY_CLIMATE_NORMALS_PL: Dict[int, Dict[str, float]] = {
 def _extend_forecast_to_60_days(
     anchor_date: date,
     existing_forecast: List[Dict[str, Any]],
+    history_series: List[Dict[str, Any]],
     recent_precip_deficit_ratio: float = 0.85,
 ) -> List[Dict[str, Any]]:
     """
-    Rozszerza prognozę synoptyczną (np. 14-16 dni z Open-Meteo) do pełnego horyzontu 60 dni (6 dekad).
-    Dla dni wykraczających poza horyzont synoptyczny wykorzystuje sezonowy model klimatologiczny
-    skorygowany o bieżący trend wilgotnościowy.
+    Rozszerza prognozę synoptyczną (16 dni z Open-Meteo) do pełnego horyzontu 60 dni (6 dekad).
+    Wykorzystuje rzeczywisty wzorzec zmienności opadów z pobranej historii Open-Meteo dla tej działki
+    przeskalowany do normy klimatycznej docelowego miesiąca, unikając sztucznych równych słupków.
     """
     result = list(existing_forecast[:60])
     start_day_offset = len(result) + 1
+    hist_len = len(history_series)
 
     for offset in range(start_day_offset, 61):
         curr_dt = anchor_date + timedelta(days=offset)
         m = curr_dt.month
         norm = MONTHLY_CLIMATE_NORMALS_PL.get(m, MONTHLY_CLIMATE_NORMALS_PL[7])
 
-        # Rozkład opadów w dekadzie (realistyczne epizody opadowe co 6-8 dni)
-        is_rain_event = (offset % 7 == 0) or (offset % 11 == 0)
-        avg_daily_precip = (norm["precip_monthly"] / 30.0) * recent_precip_deficit_ratio
-        precip_val = round(avg_daily_precip * 3.8, 1) if is_rain_event else 0.0
+        # Pobieramy wzorzec opadu z rzeczywistej historii tej działki (z przesunięciem fazowym)
+        if hist_len > 0:
+            ref_item = history_series[(offset * 7 + 3) % hist_len]
+            ref_m = anchor_date.month
+            ref_norm_p = MONTHLY_CLIMATE_NORMALS_PL.get(ref_m, norm)["precip_monthly"]
+            month_scale = (norm["precip_monthly"] / max(20.0, ref_norm_p)) * recent_precip_deficit_ratio
+            raw_p = ref_item["precipitation_mm"] * month_scale
+            # Naturalna modulacja amplitudy opadu
+            wave = 0.75 + 0.45 * abs(math.sin(offset * 1.37))
+            precip_val = round(raw_p * wave, 1) if raw_p >= 0.4 else 0.0
+        else:
+            wave = abs(math.sin(offset * 0.93 + 0.4))
+            precip_val = round((norm["precip_monthly"] / 8.5) * wave * recent_precip_deficit_ratio, 1) if wave > 0.78 else 0.0
 
-        et0_val = round(norm["et0_daily"] * (1.0 + ((offset % 5) - 2) * 0.04), 1)
-        temp_val = round(norm["temp"] + ((offset % 6) - 2.5) * 0.6, 1)
+        et0_wave = 1.0 + 0.18 * math.sin(offset * 0.65) + 0.08 * math.cos(offset * 1.4)
+        et0_val = round(max(0.2, norm["et0_daily"] * et0_wave), 1)
+        temp_val = round(norm["temp"] + 2.2 * math.sin(offset * 0.55), 1)
+        wind_val = round(2.1 + 1.8 * abs(math.sin(offset * 0.8 + 0.5)), 1)
 
         result.append({
             "date": curr_dt.strftime("%Y-%m-%d"),
             "precipitation_mm": precip_val,
-            "et0_mm": max(0.2, et0_val),
+            "et0_mm": et0_val,
             "temp_max_c": temp_val,
-            "wind_max_ms": round(2.5 + (offset % 4) * 0.5, 1),
+            "wind_max_ms": wind_val,
             "is_forecast": True,
         })
 
@@ -120,10 +134,11 @@ def _parse_weather_response(
             "is_forecast": True,
         })
 
-    # Współczynnik anomalii opadowej z ostatnich 60 dni (do projekcji sezonowej do 60 dni w przód)
     norm_60d_precip = 115.0
-    deficit_ratio = max(0.65, min(1.1, (p_60d / norm_60d_precip) if norm_60d_precip > 0 else 0.85))
-    full_60d_forecast = _extend_forecast_to_60_days(anchor_date, direct_forecast, deficit_ratio)
+    deficit_ratio = max(0.65, min(1.05, (p_60d / norm_60d_precip) if norm_60d_precip > 0 else 0.85))
+    full_60d_forecast = _extend_forecast_to_60_days(
+        anchor_date, direct_forecast, history_series, deficit_ratio
+    )
 
     fc_p_7d = sum(d["precipitation_mm"] for d in full_60d_forecast[:7])
     fc_et0_7d = sum(d["et0_mm"] for d in full_60d_forecast[:7])
@@ -214,7 +229,7 @@ async def fetch_weather_data(lat: float, lon: float, target_date_str: Optional[s
     except Exception as e:
         logger.warning(f"[Open-Meteo] Błąd połączenia / timeout: {e}")
 
-    fallback_forecast = _extend_forecast_to_60_days(target_date, [], 0.8)
+    fallback_forecast = _extend_forecast_to_60_days(target_date, [], [], 0.8)
     return {
         "precipitation_30d_mm": 38.0,
         "precipitation_60d_mm": 72.0,
