@@ -60,6 +60,21 @@ export interface DailyWeatherPoint {
   wind_max_ms?: number | null;
 }
 
+export interface DecadeForecastPoint {
+  decade_number: number;
+  period_label: string;
+  start_date: string;
+  end_date: string;
+  crop_kc: number;
+  growth_stage: string;
+  precipitation_mm: number;
+  et0_mm: number;
+  etc_mm: number;
+  kbw_decade_mm: number;
+  kbw_60d_rolling_mm: number;
+  risk_status: string;
+}
+
 export interface Diagnosis {
   kbw_30d_mm: number;
   kbw_60d_mm: number;
@@ -79,7 +94,12 @@ export interface Diagnosis {
   et0_30d_mm?: number | null;
   forecast_7d_precip_mm?: number | null;
   forecast_7d_et0_mm?: number | null;
+  forecast_60d_precip_mm?: number | null;
+  forecast_60d_et0_mm?: number | null;
+  forecast_60d_kbw_mm?: number | null;
+  critical_threshold_kbw_60d_mm?: number | null;
   daily_weather_series?: DailyWeatherPoint[] | null;
+  forecast_60d_decades?: DecadeForecastPoint[] | null;
 }
 
 export interface RetentionAction {

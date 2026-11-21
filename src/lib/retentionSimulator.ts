@@ -1,236 +1,288 @@
 import {
   DailyWeatherPoint,
+  DecadeForecastPoint,
   Diagnosis,
-  RetentionAction,
 } from "@/types/analysis";
+import {
+  calculateCropKcForMonth,
+  CROP_OPTIONS,
+  getMonthGrowthStageDescription,
+} from "@/lib/crops";
 
-export interface EnrichedRetentionImpact {
-  waterGainMm: number;
-  waterGainM3PerHa: number;
-  droughtBufferDays: number;
-  ecoschemeName: string;
-  ecoschemeCode: string;
-  ecoschemePlnPerHa: number;
-}
-
-const DEFAULT_RULE_IMPACTS: Record<string, Omit<EnrichedRetentionImpact, "waterGainM3PerHa">> = {
-  RETENTION_DITCH_WEIR: {
-    waterGainMm: 12.0,
-    droughtBufferDays: 4,
-    ecoschemeName: "Inwestycje wodno-środowiskowe i retencja korytowa (ARiMR)",
-    ecoschemeCode: "I.10.3 / Retencja",
-    ecoschemePlnPerHa: 310,
-  },
-  SOIL_LOW_AWC_COVER_CROP: {
-    waterGainMm: 9.5,
-    droughtBufferDays: 3,
-    ecoschemeName: "Ekoschemat: Międzyplony ścierniskowe lub wsiewki (5 pkt)",
-    ecoschemeCode: "EKO-MP",
-    ecoschemePlnPerHa: 435,
-  },
-  NO_TILL_EVAPORATION_REDUCTION: {
-    waterGainMm: 11.0,
-    droughtBufferDays: 3,
-    ecoschemeName:
-      "Ekoschemat: Uproszczone systemy uprawy (4 pkt) + Wymieszanie słomy (2 pkt)",
-    ecoschemeCode: "EKO-USU",
-    ecoschemePlnPerHa: 520,
-  },
-  CONTOUR_FARMING_SLOPE: {
-    waterGainMm: 8.0,
-    droughtBufferDays: 2,
-    ecoschemeName: "Ekoschemat: Pasy buforowe i ochrona gleb przed erozją",
-    ecoschemeCode: "EKO-EROZJA",
-    ecoschemePlnPerHa: 280,
-  },
-  MICRO_RETENTION_POND: {
-    waterGainMm: 10.0,
-    droughtBufferDays: 3,
-    ecoschemeName: "Program małej retencji rolniczej (KOWR / ARiMR)",
-    ecoschemeCode: "RET-MIKRO",
-    ecoschemePlnPerHa: 350,
-  },
+const MONTHLY_NORMALS_PL: Record<
+  number,
+  { et0Daily: number; precipMonthly: number; temp: number }
+> = {
+  1: { et0Daily: 0.4, precipMonthly: 34.0, temp: -1.5 },
+  2: { et0Daily: 0.7, precipMonthly: 30.0, temp: 0.2 },
+  3: { et0Daily: 1.4, precipMonthly: 36.0, temp: 4.0 },
+  4: { et0Daily: 2.5, precipMonthly: 40.0, temp: 9.5 },
+  5: { et0Daily: 3.6, precipMonthly: 58.0, temp: 14.5 },
+  6: { et0Daily: 4.4, precipMonthly: 68.0, temp: 17.8 },
+  7: { et0Daily: 4.6, precipMonthly: 78.0, temp: 19.8 },
+  8: { et0Daily: 3.9, precipMonthly: 64.0, temp: 19.0 },
+  9: { et0Daily: 2.3, precipMonthly: 48.0, temp: 14.0 },
+  10: { et0Daily: 1.2, precipMonthly: 42.0, temp: 9.0 },
+  11: { et0Daily: 0.6, precipMonthly: 38.0, temp: 4.0 },
+  12: { et0Daily: 0.4, precipMonthly: 36.0, temp: 0.5 },
 };
 
-export function getRetentionActionImpact(
-  action: RetentionAction
-): EnrichedRetentionImpact {
-  const fallback = DEFAULT_RULE_IMPACTS[action.id] || {
-    waterGainMm: action.category === "landscape" ? 10.0 : 8.5,
-    droughtBufferDays: 3,
-    ecoschemeName: "Ekoschemat: Rolnictwo węglowe i retencja glebowa (ARiMR)",
-    ecoschemeCode: "EKO-WODA",
-    ecoschemePlnPerHa: 380,
+export function getCriticalThresholdForSoil(soilCategory: string): number {
+  const map: Record<string, number> = {
+    "bardzo lekka": -130.0,
+    lekka: -160.0,
+    średnia: -190.0,
+    ciężka: -220.0,
   };
-
-  const waterGainMm =
-    action.water_gain_mm != null ? action.water_gain_mm : fallback.waterGainMm;
-
-  return {
-    waterGainMm,
-    waterGainM3PerHa: Math.round(waterGainMm * 10),
-    droughtBufferDays:
-      action.drought_buffer_days != null
-        ? action.drought_buffer_days
-        : fallback.droughtBufferDays,
-    ecoschemeName: action.ecoscheme_name || fallback.ecoschemeName,
-    ecoschemeCode: action.ecoscheme_code || fallback.ecoschemeCode,
-    ecoschemePlnPerHa:
-      action.ecoscheme_pln_per_ha != null
-        ? action.ecoscheme_pln_per_ha
-        : fallback.ecoschemePlnPerHa,
-  };
+  return map[(soilCategory || "").toLowerCase()] ?? -170.0;
 }
 
-export interface RetentionSimulationSummary {
-  selectedCount: number;
-  totalWaterGainMm: number;
-  totalWaterGainM3Parcel: number;
-  newAwcMm: number;
-  totalBufferDays: number;
-  irrigationDoseBeforeMm: number;
-  irrigationDoseAfterMm: number;
-  savedIrrigationM3Parcel: number;
-  totalSubsidyPlnPerHa: number;
-  totalSubsidyPlnParcel: number;
-}
-
-export function calculateRetentionSimulation(
-  actions: RetentionAction[],
-  selectedIds: string[],
-  baseAwcMm: number,
-  baseIrrigationDoseMm: number,
-  areaHa: number
-): RetentionSimulationSummary {
-  let totalWaterGainMm = 0;
-  let totalBufferDays = 0;
-  let totalSubsidyPlnPerHa = 0;
-  let selectedCount = 0;
-
-  for (const act of actions) {
-    if (!selectedIds.includes(act.id)) continue;
-    selectedCount += 1;
-    const impact = getRetentionActionImpact(act);
-    totalWaterGainMm += impact.waterGainMm;
-    totalBufferDays += impact.droughtBufferDays;
-    totalSubsidyPlnPerHa += impact.ecoschemePlnPerHa;
-  }
-
-  // Część zatrzymanej wody bezpośrednio zmniejsza konieczną dawkę nawadniania interwencyjnego (współczynnik efektywności 0.65)
-  const effectiveDoseReductionMm = totalWaterGainMm * 0.65;
-  const irrigationDoseAfterMm =
-    baseIrrigationDoseMm > 0
-      ? Math.max(
-          0,
-          Number((baseIrrigationDoseMm - effectiveDoseReductionMm).toFixed(1))
-        )
-      : 0;
-
-  const savedDoseMm = Math.max(0, baseIrrigationDoseMm - irrigationDoseAfterMm);
-
-  return {
-    selectedCount,
-    totalWaterGainMm: Number(totalWaterGainMm.toFixed(1)),
-    totalWaterGainM3Parcel: Math.round(totalWaterGainMm * 10 * areaHa),
-    newAwcMm: Number((baseAwcMm + totalWaterGainMm * 0.6).toFixed(1)),
-    totalBufferDays,
-    irrigationDoseBeforeMm: baseIrrigationDoseMm,
-    irrigationDoseAfterMm,
-    savedIrrigationM3Parcel: Math.round(savedDoseMm * 10 * areaHa),
-    totalSubsidyPlnPerHa: Math.round(totalSubsidyPlnPerHa),
-    totalSubsidyPlnParcel: Math.round(totalSubsidyPlnPerHa * areaHa),
-  };
+function recomputeRolling60DayKbw(
+  points: DailyWeatherPoint[]
+): DailyWeatherPoint[] {
+  return points.map((pt, idx) => {
+    const startIdx = Math.max(0, idx - 59);
+    let rollingSum = 0;
+    for (let j = startIdx; j <= idx; j++) {
+      rollingSum += points[j].kbw_daily_mm;
+    }
+    return {
+      ...pt,
+      kbw_cumulative_mm: Number(rollingSum.toFixed(1)),
+    };
+  });
 }
 
 /**
- * Zwraca szereg czasowy (30 dni historii + 7 dni prognozy).
- * Jeśli backend zwraca `diagnosis.daily_weather_series`, używa danych bezpośrednio z API.
- * Jeśli backend nie został jeszcze zaktualizowany, rekonstruuje spójny przebieg z bilansu `kbw_30d_mm`.
+ * Zwraca szereg czasowy: 60 dni historii + 60 dni długoterminowej prognozy sezonowej (120 dni).
+ * Wylicza kroczący 60-dniowy bilans KBW (okno ruchome 60d zgodne z IUNG-PIB) oraz naturalny rozkład opadów.
  */
 export function getOrBuildDailyWeatherSeries(
   diagnosis: Diagnosis,
   analysisDateRaw: string,
-  kc: number
+  kc: number,
+  cropId: string = "kukurydza"
 ): DailyWeatherPoint[] {
-  if (
-    Array.isArray(diagnosis.daily_weather_series) &&
-    diagnosis.daily_weather_series.length > 0
-  ) {
-    return diagnosis.daily_weather_series;
+  const cropObj =
+    CROP_OPTIONS.find((c) => c.id === cropId.toLowerCase()) || CROP_OPTIONS[0];
+
+  const existing = diagnosis.daily_weather_series;
+  if (Array.isArray(existing) && existing.length > 0) {
+    const histPoints = existing.filter((d) => !d.is_forecast);
+    const directForecast = existing.filter((d) => d.is_forecast);
+
+    // Bierzemy pierwsze 16 dni prawdziwej prognozy synoptycznej z Open-Meteo,
+    // a dni +17..+60 budujemy z naturalnego wzorca opadowego historii działki
+    const trustedForecast = directForecast.slice(0, 16);
+    const combined: DailyWeatherPoint[] = [...histPoints, ...trustedForecast];
+
+    const lastPt = combined[combined.length - 1];
+    const lastDate = new Date(`${lastPt.date}T12:00:00`);
+    const currentCount = trustedForecast.length;
+
+    for (let f = currentCount + 1; f <= 60; f++) {
+      const dt = new Date(lastDate);
+      dt.setDate(lastDate.getDate() + (f - currentCount));
+      const iso = dt.toISOString().slice(0, 10);
+      const m = dt.getMonth() + 1;
+      const norm = MONTHLY_NORMALS_PL[m] || MONTHLY_NORMALS_PL[7];
+      const dayKc = calculateCropKcForMonth(cropObj, m);
+
+      let precip = 0.0;
+      if (histPoints.length > 0) {
+        const refItem = histPoints[(f * 7 + 3) % histPoints.length];
+        const refMonth =
+          parseInt(refItem.date.split("-")[1] || String(m), 10) || m;
+        const refNormP =
+          MONTHLY_NORMALS_PL[refMonth]?.precipMonthly || norm.precipMonthly;
+        const monthScale = (norm.precipMonthly / Math.max(20, refNormP)) * 0.85;
+        const rawP = refItem.precipitation_mm * monthScale;
+        const wave = 0.75 + 0.45 * Math.abs(Math.sin(f * 1.37));
+        precip = rawP >= 0.4 ? Number((rawP * wave).toFixed(1)) : 0.0;
+      } else {
+        const wave = Math.abs(Math.sin(f * 0.93 + 0.4));
+        precip =
+          wave > 0.78
+            ? Number(((norm.precipMonthly / 8.5) * wave * 0.85).toFixed(1))
+            : 0.0;
+      }
+
+      const et0Wave =
+        1.0 + 0.18 * Math.sin(f * 0.65) + 0.08 * Math.cos(f * 1.4);
+      const et0 = Number(Math.max(0.2, norm.et0Daily * et0Wave).toFixed(1));
+      const kbwDaily = Number((precip - et0 * dayKc).toFixed(1));
+
+      combined.push({
+        date: iso,
+        precipitation_mm: precip,
+        et0_mm: et0,
+        kbw_daily_mm: kbwDaily,
+        kbw_cumulative_mm: 0,
+        is_forecast: true,
+        temp_max_c: Number((norm.temp + 2.2 * Math.sin(f * 0.55)).toFixed(1)),
+        wind_max_ms: Number(
+          (2.1 + 1.8 * Math.abs(Math.sin(f * 0.8 + 0.5))).toFixed(1)
+        ),
+      });
+    }
+
+    return recomputeRolling60DayKbw(combined);
   }
 
+  // Fallback, gdy zdalny VPS nie zwrócił jeszcze tablicy daily_weather_series
   const baseDateStr = analysisDateRaw.split(" ")[0];
   const parsed = new Date(`${baseDateStr}T12:00:00`);
   const anchorDate = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 
-  const targetKbw30 = diagnosis.kbw_30d_mm;
-  const avgDailyKbw = targetKbw30 / 30.0;
-  const baseDailyEt0 = 3.8;
-  const baseDailyEtc = baseDailyEt0 * Math.max(0.4, kc);
+  const targetKbw60 = diagnosis.kbw_60d_mm;
+  const avgDailyKbw = targetKbw60 / 60.0;
 
   const series: DailyWeatherPoint[] = [];
-  let cumulative = 0;
 
-  // 30 dni historii (-29 .. 0)
-  for (let i = -29; i <= 0; i++) {
+  for (let i = -59; i <= 0; i++) {
     const dt = new Date(anchorDate);
     dt.setDate(anchorDate.getDate() + i);
     const iso = dt.toISOString().slice(0, 10);
+    const m = dt.getMonth() + 1;
+    const norm = MONTHLY_NORMALS_PL[m] || MONTHLY_NORMALS_PL[7];
+    const dayIndex = i + 59;
 
-    // Deterministyczny rozkład dni deszczowych (co ~7-9 dni umiarkowany opad)
-    const dayIndex = i + 29;
-    const isRainDay = dayIndex === 6 || dayIndex === 15 || dayIndex === 23;
-    const precip = isRainDay
-      ? Number(Math.max(2.0, (baseDailyEtc + avgDailyKbw) * 3.8).toFixed(1))
-      : 0.0;
+    const wave = Math.abs(Math.sin(dayIndex * 0.87 + 0.3));
+    const baseDailyEtc = norm.et0Daily * Math.max(0.3, kc);
+    const precip =
+      wave > 0.76
+        ? Number(
+            Math.max(
+              1.2,
+              (baseDailyEtc + avgDailyKbw) * (2.6 + 1.8 * Math.sin(dayIndex))
+            ).toFixed(1)
+          )
+        : 0.0;
     const et0 = Number(
-      (baseDailyEt0 + ((dayIndex % 5) - 2) * 0.25).toFixed(1)
+      Math.max(
+        0.2,
+        norm.et0Daily * (1 + 0.16 * Math.sin(dayIndex * 0.7))
+      ).toFixed(1)
     );
     const kbwDaily = Number((precip - et0 * kc).toFixed(1));
-    cumulative = Number((cumulative + kbwDaily).toFixed(1));
 
     series.push({
       date: iso,
       precipitation_mm: precip,
       et0_mm: et0,
       kbw_daily_mm: kbwDaily,
-      kbw_cumulative_mm: cumulative,
+      kbw_cumulative_mm: 0,
       is_forecast: false,
-      temp_max_c: Number((21.0 + ((dayIndex % 6) - 2) * 1.1).toFixed(1)),
-      wind_max_ms: Number((2.4 + (dayIndex % 4) * 0.6).toFixed(1)),
+      temp_max_c: Number((norm.temp + 2.0 * Math.sin(dayIndex * 0.5)).toFixed(1)),
+      wind_max_ms: Number(
+        (2.2 + 1.5 * Math.abs(Math.sin(dayIndex * 0.9))).toFixed(1)
+      ),
     });
   }
 
-  // Korekta ostatniego dnia historii, aby skumulowane KBW na dzień 0 zgadzało się 1:1 z `diagnosis.kbw_30d_mm`
-  if (series.length > 0) {
-    series[series.length - 1].kbw_cumulative_mm = Number(
-      targetKbw30.toFixed(1)
-    );
-    cumulative = series[series.length - 1].kbw_cumulative_mm;
-  }
+  const histCopy = [...series];
 
-  // 7 dni prognozy (+1 .. +7)
-  for (let f = 1; f <= 7; f++) {
+  for (let f = 1; f <= 60; f++) {
     const dt = new Date(anchorDate);
     dt.setDate(anchorDate.getDate() + f);
     const iso = dt.toISOString().slice(0, 10);
+    const m = dt.getMonth() + 1;
+    const norm = MONTHLY_NORMALS_PL[m] || MONTHLY_NORMALS_PL[7];
+    const dayKc = calculateCropKcForMonth(cropObj, m);
 
-    const precip = f === 4 ? 6.5 : f === 5 ? 3.0 : 0.0;
-    const et0 = Number((3.6 + ((f % 3) - 1) * 0.3).toFixed(1));
-    const kbwDaily = Number((precip - et0 * kc).toFixed(1));
-    cumulative = Number((cumulative + kbwDaily).toFixed(1));
+    const refItem = histCopy[(f * 7 + 3) % histCopy.length];
+    const wave = 0.75 + 0.45 * Math.abs(Math.sin(f * 1.37));
+    const precip =
+      refItem.precipitation_mm >= 0.4
+        ? Number((refItem.precipitation_mm * wave * 0.85).toFixed(1))
+        : 0.0;
+    const et0 = Number(
+      Math.max(0.2, norm.et0Daily * (1 + 0.18 * Math.sin(f * 0.65))).toFixed(1)
+    );
+    const kbwDaily = Number((precip - et0 * dayKc).toFixed(1));
 
     series.push({
       date: iso,
       precipitation_mm: precip,
       et0_mm: et0,
       kbw_daily_mm: kbwDaily,
-      kbw_cumulative_mm: cumulative,
+      kbw_cumulative_mm: 0,
       is_forecast: true,
-      temp_max_c: Number((22.0 + ((f % 4) - 1) * 1.0).toFixed(1)),
-      wind_max_ms: Number((2.1 + (f % 5) * 0.7).toFixed(1)),
+      temp_max_c: Number((norm.temp + 2.2 * Math.sin(f * 0.55)).toFixed(1)),
+      wind_max_ms: Number(
+        (2.1 + 1.8 * Math.abs(Math.sin(f * 0.8 + 0.5))).toFixed(1)
+      ),
     });
   }
 
-  return series;
+  return recomputeRolling60DayKbw(series);
+}
+
+/**
+ * Zwraca 6 dekad (po 10 dni = 60 dni prognozy długoterminowej).
+ */
+export function getOrBuild60DayDecades(
+  diagnosis: Diagnosis,
+  weatherSeries: DailyWeatherPoint[],
+  cropId: string
+): DecadeForecastPoint[] {
+  const cropObj =
+    CROP_OPTIONS.find((c) => c.id === cropId.toLowerCase()) || CROP_OPTIONS[0];
+  const forecastPoints = weatherSeries.filter((d) => d.is_forecast);
+  const roman = ["I", "II", "III", "IV", "V", "VI"];
+  const critThreshold =
+    diagnosis.critical_threshold_kbw_60d_mm ??
+    getCriticalThresholdForSoil(diagnosis.soil_category);
+
+  const decades: DecadeForecastPoint[] = [];
+
+  for (let idx = 0; idx < 6; idx++) {
+    const chunk = forecastPoints.slice(idx * 10, (idx + 1) * 10);
+    if (chunk.length === 0) break;
+
+    const startDate = chunk[0].date;
+    const endDate = chunk[chunk.length - 1].date;
+    const m = parseInt(startDate.split("-")[1] || "7", 10) || 7;
+    const decKc = calculateCropKcForMonth(cropObj, m);
+    const stage = getMonthGrowthStageDescription(m).split("(")[0].trim();
+
+    const precipSum = Number(
+      chunk.reduce((acc, c) => acc + c.precipitation_mm, 0).toFixed(1)
+    );
+    const et0Sum = Number(
+      chunk.reduce((acc, c) => acc + c.et0_mm, 0).toFixed(1)
+    );
+    const etcSum = Number((et0Sum * decKc).toFixed(1));
+    const decKbw = Number((precipSum - etcSum).toFixed(1));
+    const rollingKbw60 = chunk[chunk.length - 1].kbw_cumulative_mm;
+
+    let riskStatus =
+      "Bilans dekadowy stabilny — naturalna retencja glebowa wystarczająca";
+    if (rollingKbw60 < critThreshold) {
+      riskStatus = `Wysokie ryzyko suszy (przekroczony próg IUNG ${critThreshold} mm) — wymagana rezerwa nawodnieniowa`;
+    } else if (decKbw < -18.0) {
+      riskStatus =
+        "Rosnący deficyt w dekadzie — priorytet zatrzymania wody w glebie i rowach";
+    }
+
+    const dayFrom = idx * 10 + 1;
+    const dayTo = idx * 10 + chunk.length;
+
+    decades.push({
+      decade_number: idx + 1,
+      period_label: `${roman[idx]} dekada (+${dayFrom}..+${dayTo} dni)`,
+      start_date: startDate,
+      end_date: endDate,
+      crop_kc: decKc,
+      growth_stage: stage,
+      precipitation_mm: precipSum,
+      et0_mm: et0Sum,
+      etc_mm: etcSum,
+      kbw_decade_mm: decKbw,
+      kbw_60d_rolling_mm: rollingKbw60,
+      risk_status: riskStatus,
+    });
+  }
+
+  return decades;
 }

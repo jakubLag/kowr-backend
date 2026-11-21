@@ -15,7 +15,10 @@ import {
   searchParcelByTeryt,
 } from "@/lib/api";
 import { getStoredParcel, saveStoredParcel } from "@/lib/parcelStore";
-import { getOrBuildDailyWeatherSeries } from "@/lib/retentionSimulator";
+import {
+  getOrBuild60DayDecades,
+  getOrBuildDailyWeatherSeries,
+} from "@/lib/retentionSimulator";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 import LoadingAnalysis from "@/components/LoadingAnalysis";
@@ -98,14 +101,19 @@ function ReportPageContent() {
     return getOrBuildDailyWeatherSeries(
       analysisResult.step1_diagnosis,
       dateParam || analysisResult.metadata.analysis_date,
-      analysisResult.kc_coefficient
+      analysisResult.kc_coefficient,
+      cropParam
     );
-  }, [analysisResult, dateParam]);
+  }, [analysisResult, dateParam, cropParam]);
 
-  const forecastDays = useMemo(
-    () => weatherSeries.filter((d) => d.is_forecast),
-    [weatherSeries]
-  );
+  const forecastDecades = useMemo(() => {
+    if (!analysisResult) return [];
+    return getOrBuild60DayDecades(
+      analysisResult.step1_diagnosis,
+      weatherSeries,
+      cropParam
+    );
+  }, [analysisResult, weatherSeries, cropParam]);
 
   return (
     <div className="min-h-screen flex flex-col bg-white text-gov-text">
@@ -274,6 +282,7 @@ function ReportPageContent() {
               cropName={cropLabel}
               kcCoefficient={analysisResult.kc_coefficient}
               weatherSeries={weatherSeries}
+              forecastDecades={forecastDecades}
             />
 
             <Step2Retention
@@ -284,7 +293,7 @@ function ReportPageContent() {
               irrigation={analysisResult.step3_irrigation}
               areaHa={analysisResult.parcel_info.area_ha}
               cropName={cropLabel}
-              forecastDays={forecastDays}
+              forecastDecades={forecastDecades}
             />
 
             <CropRotationComparison

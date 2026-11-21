@@ -4,9 +4,11 @@ import React from "react";
 import dynamic from "next/dynamic";
 import {
   DailyWeatherPoint,
+  DecadeForecastPoint,
   Diagnosis,
   ParcelSearchResponse,
 } from "@/types/analysis";
+import { getCriticalThresholdForSoil } from "@/lib/retentionSimulator";
 import {
   BarChart,
   Bar,
@@ -41,6 +43,7 @@ interface Step1AssessmentProps {
   cropName: string;
   kcCoefficient: number;
   weatherSeries: DailyWeatherPoint[];
+  forecastDecades: DecadeForecastPoint[];
 }
 
 function getRiskDetails(level: string) {
@@ -72,8 +75,12 @@ export default function Step1Assessment({
   cropName,
   kcCoefficient,
   weatherSeries,
+  forecastDecades,
 }: Step1AssessmentProps) {
   const risk = getRiskDetails(diagnosis.drought_risk_level);
+  const critThreshold =
+    diagnosis.critical_threshold_kbw_60d_mm ??
+    getCriticalThresholdForSoil(diagnosis.soil_category);
 
   const summaryBarData = [
     {
@@ -111,19 +118,21 @@ export default function Step1Assessment({
   const forecastPoints = weatherSeries.filter((p) => p.is_forecast);
   const firstForecastPoint = forecastPoints[0];
   const lastForecastPoint = forecastPoints[forecastPoints.length - 1];
-  const forecastPrecipSum =
-    diagnosis.forecast_7d_precip_mm != null
-      ? diagnosis.forecast_7d_precip_mm
+  const forecast60dPrecipSum =
+    diagnosis.forecast_60d_precip_mm != null
+      ? diagnosis.forecast_60d_precip_mm
       : Number(
           forecastPoints
             .reduce((acc, p) => acc + p.precipitation_mm, 0)
             .toFixed(1)
         );
 
-  const forecastKbwEnd =
-    forecastPoints.length > 0
-      ? forecastPoints[forecastPoints.length - 1].kbw_cumulative_mm
-      : diagnosis.kbw_30d_mm;
+  const forecast60dKbwEnd =
+    forecastDecades.length > 0
+      ? forecastDecades[forecastDecades.length - 1].kbw_60d_rolling_mm
+      : forecastPoints.length > 0
+        ? forecastPoints[forecastPoints.length - 1].kbw_cumulative_mm
+        : diagnosis.kbw_60d_mm;
 
   return (
     <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:break-inside-avoid">
@@ -228,16 +237,27 @@ export default function Step1Assessment({
                       : `nadwyżka ${diagnosis.kbw_60d_mm.toFixed(1)} l/m²`}
                   </td>
                 </tr>
+                <tr>
+                  <td className="font-medium">
+                    Próg krytyczny suszy IUNG-PIB (gleba: {diagnosis.soil_category})
+                  </td>
+                  <td className="text-right font-mono font-bold text-gov-danger">
+                    {critThreshold.toFixed(1)} mm
+                  </td>
+                  <td className="text-right font-mono text-xs text-gov-secondary">
+                    kryterium 60-dniowego KBW
+                  </td>
+                </tr>
                 <tr className="bg-gov-surface">
                   <td className="font-bold text-gov-navy">
-                    Prognoza na kolejne 7 dni (Open-Meteo)
+                    Prognoza długoterminowa na 60 dni (6 dekad)
                   </td>
                   <td className="text-right font-mono font-bold text-gov-blue">
-                    opad: +{forecastPrecipSum.toFixed(1)} mm
+                    opad 60d: +{forecast60dPrecipSum.toFixed(1)} mm
                   </td>
                   <td className="text-right font-mono font-semibold text-gov-navy">
-                    KBW za 7 dni: {forecastKbwEnd > 0 ? "+" : ""}
-                    {forecastKbwEnd.toFixed(1)} mm
+                    KBW (60d): {forecast60dKbwEnd > 0 ? "+" : ""}
+                    {forecast60dKbwEnd.toFixed(1)} mm
                   </td>
                 </tr>
               </tbody>
@@ -305,12 +325,12 @@ export default function Step1Assessment({
         </div>
       </div>
 
-      {/* 1.2 Przebieg bilansu w czasie: 30 dni historii + 7 dni prognozy */}
+      {/* 1.2 Przebieg bilansu w czasie: historia + 60 dni prognozy długoterminowej */}
       <div className="space-y-3 pt-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="text-base font-bold text-gov-navy">
-            1.2. Przebieg bilansu wodnego dzień po dniu (30 dni historii + 7 dni
-            prognozy)
+            1.2. Długoterminowy przebieg i prognoza bilansu wodnego (+60 dni / 6
+            dekad w przód)
           </h3>
           <div className="flex flex-wrap items-center gap-4 text-xs text-gov-secondary">
             <span className="inline-flex items-center gap-1.5">
@@ -319,18 +339,23 @@ export default function Step1Assessment({
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block w-4 h-0.5 bg-[#C81E1E]" />
-              <span>Skumulowany bilans KBW [mm]</span>
+              <span>Kroczący bilans 60-dniowy KBW [mm]</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-4 h-0.5 border-b-2 border-dashed border-[#7F1D1D]" />
+              <span>Próg suszy IUNG ({critThreshold} mm)</span>
             </span>
           </div>
         </div>
         <p className="text-sm text-gov-secondary leading-relaxed">
-          Czerwona linia pokazuje narastający deficyt wody w ostatnich 30 dniach
-          oraz prognozowany trend na najbliższe 7 dni (po prawej stronie linii
-          przerywanej).
+          Wykres prezentuje dotychczasowy przebieg bilansu wodnego (lewa strona)
+          oraz <strong>60-dniową prognozę długoterminową</strong> (zacieniowana
+          strefa po prawej stronie) uwzględniającą zmieniający się współczynnik
+          zapotrzebowania wodnego uprawy (Kc) w kolejnych dwóch miesiącach.
         </p>
 
         <div className="border border-gov-border p-4 bg-white">
-          <div className="w-full h-60">
+          <div className="w-full h-64">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={timeSeriesChartData}
@@ -340,17 +365,19 @@ export default function Step1Assessment({
                 <XAxis
                   dataKey="shortDate"
                   tick={{ fontSize: 11, fill: "#4A5568" }}
-                  interval={2}
+                  minTickGap={22}
                 />
                 <YAxis
                   yAxisId="kbw"
                   orientation="left"
+                  width={58}
                   unit=" mm"
                   tick={{ fontSize: 11, fill: "#1B1B1B" }}
                 />
                 <YAxis
                   yAxisId="precip"
                   orientation="right"
+                  width={50}
                   unit=" mm"
                   domain={[
                     0,
@@ -362,7 +389,7 @@ export default function Step1Assessment({
                 <Tooltip
                   formatter={(value: number, name: string) => {
                     if (name === "kbw_cumulative_mm") {
-                      return [`${value} mm`, "Skumulowany bilans KBW"];
+                      return [`${value} mm`, "Kroczący bilans 60-dniowy KBW"];
                     }
                     if (name === "precipitation_mm") {
                       return [`${value} mm`, "Opad dobowy"];
@@ -373,7 +400,9 @@ export default function Step1Assessment({
                     const item = payload?.[0]?.payload;
                     if (!item) return `Data: ${label}`;
                     return `${item.date} — ${
-                      item.is_forecast ? "PROGNOZA 7-DNIOWA" : "Pomiar historyczny"
+                      item.is_forecast
+                        ? "PROGNOZA DŁUGOTERMINOWA (60 dni)"
+                        : "Pomiar historyczny"
                     } (ET0: ${item.et0_mm} mm)`;
                   }}
                   contentStyle={{
@@ -387,6 +416,20 @@ export default function Step1Assessment({
                   y={0}
                   stroke="#64707D"
                   strokeDasharray="3 3"
+                />
+                <ReferenceLine
+                  yAxisId="kbw"
+                  y={critThreshold}
+                  stroke="#7F1D1D"
+                  strokeWidth={1.5}
+                  strokeDasharray="5 3"
+                  label={{
+                    value: `Próg suszy IUNG (${critThreshold} mm)`,
+                    position: "insideBottomLeft",
+                    fill: "#7F1D1D",
+                    fontSize: 10,
+                    fontWeight: 700,
+                  }}
                 />
                 {firstForecastPoint && lastForecastPoint && (
                   <ReferenceArea
@@ -405,7 +448,7 @@ export default function Step1Assessment({
                     strokeWidth={2}
                     strokeDasharray="4 3"
                     label={{
-                      value: "Prognoza 7 dni →",
+                      value: "Prognoza 60 dni (6 dekad) →",
                       position: "insideTopRight",
                       fill: "#0B2240",
                       fontSize: 11,
@@ -416,7 +459,7 @@ export default function Step1Assessment({
                 <Bar
                   yAxisId="precip"
                   dataKey="precipitation_mm"
-                  barSize={10}
+                  barSize={6}
                 >
                   {timeSeriesChartData.map((entry, idx) => (
                     <Cell
