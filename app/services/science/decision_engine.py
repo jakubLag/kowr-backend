@@ -49,6 +49,8 @@ def evaluate_rules(
 
     if slope_percent >= 3.0:
         primary_causes.append(f"Spadek terenu {slope_percent:.1f}% powoduje intensywny spływ powierzchniowy wody przed jej wsiąknięciem w profil glebowy.")
+    else:
+        primary_causes.append(f"Nachylenie terenu ({slope_percent:.1f}%) jest na tyle małe, że rowy nie wpływają na nawodnienie.")
 
     if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
         if is_waterlogged:
