@@ -70,7 +70,7 @@ async def analyze_parcel(request: AnalyzeRequest):
     weather_task = fetch_weather_data(lat, lon, request.target_date)
     sentinel_task = fetch_sentinel_indices(lat, lon, request.target_date)
     soil_task = fetch_soil_properties(lat, lon)
-    terrain_task = fetch_terrain_and_hydro(lat, lon)
+    terrain_task = fetch_terrain_and_hydro(lat, lon, ditch_distance_m=request.ditch_distance_m)
 
     weather_data, sentinel_data, soil_data, terrain_data = await asyncio.gather(
         weather_task,
@@ -151,9 +151,9 @@ async def analyze_parcel(request: AnalyzeRequest):
     sources = [
         "Granice działki: ULDK GUGiK (Główny Urząd Geodezji i Kartografii)",
         "Meteorologia: Open-Meteo Archive / Forecast API (metodyka FAO-56 Penman-Monteith)",
-        "Teledetekcja: Sentinel-2 L2A (AWS Earth Search STAC COG)",
+        "Teledetekcja: Copernicus Data Space Ecosystem (CDSE) / Sentinel-2 L2A Process API",
         "Gleba i uziarnienie: ISRIC SoilGrids v2.0 REST API + równania Saxtona & Rawlsa (2006)",
-        "Rzeźba i cieki: Geoportal NMT WCS + Overpass API / BDOT10k"
+        "Hydrografia i rzeźba: IMGW-PIB Hydro / PGW Wody Polskie Hydroportal + Geoportal NMT"
     ]
 
     exec_time_ms = int((time.time() - start_time) * 1000)

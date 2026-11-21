@@ -29,6 +29,7 @@ class AnalyzeRequest(BaseModel):
     teryt: str = Field(..., description="Format TERYT: WWPPGG_R.OOOO.NR_DZIAŁKI", json_schema_extra={"example": "141201_1.0001.123/4"})
     crop: str = Field(default="kukurydza", description="Gatunek uprawy (np. kukurydza, pszenica_ozima, rzepak)")
     target_date: Optional[str] = Field(default=None, description="Data analizy w formacie YYYY-MM-DD (domyślnie bieżąca data)")
+    ditch_distance_m: Optional[float] = Field(default=None, description="Opcjonalna odległość do rowu melioracyjnego w metrach (np. podana z mapy Geoportalu)")
 
 class Diagnosis(BaseModel):
     kbw_30d_mm: float = Field(..., description="Klimatyczny Bilans Wodny za ostatnie 30 dni (mm)")

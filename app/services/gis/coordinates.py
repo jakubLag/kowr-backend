@@ -66,6 +66,24 @@ def transform_2180_to_4326(x: float, y: float) -> Tuple[float, float]:
     return math.degrees(lon_rad), math.degrees(lat_rad)
 
 
+def transform_4326_to_2180(lon: float, lat: float) -> Tuple[float, float]:
+    """
+    Konwertuje punkt z WGS84 (EPSG:4326) do układu PUWG 1992 (EPSG:2180).
+    Zwraca (northing, easting) - współrzędne w metrach dla Polski,
+    gdzie northing to X w API NMT GUGiK, a easting to Y.
+    """
+    if HAS_PYPROJ:
+        easting, northing = _transformer_4326_to_2180.transform(lon, lat)
+        return northing, easting
+
+    # Przybliżona konwersja matematyczna dla Polski
+    dlat = lat - 52.0
+    dlon = lon - 19.0
+    northing = 480000.0 + dlat * 111320.0
+    easting = 500000.0 + dlon * 68500.0
+    return northing, easting
+
+
 def transform_coordinates_list(coords: Any) -> Any:
     """
     Rekurencyjnie przetwarza tablice współrzędnych [Y, X] lub [X, Y] z EPSG:2180 do [lon, lat] EPSG:4326.

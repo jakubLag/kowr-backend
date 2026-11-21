@@ -45,6 +45,9 @@ class Settings(BaseModel):
     SOILGRIDS_BASE_URL: str = "https://rest.isric.org/soilgrids/v2.0/properties/query"
     STAC_EARTH_SEARCH_URL: str = "https://earth-search.aws.element84.com/v1"
     GEOPORTAL_NMT_WCS_URL: str = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WCS/DemService"
+    GUGIK_NMT_URL: str = "https://services.gugik.gov.pl/nmt/"
+    IMGW_HYDRO_URL: str = "https://danepubliczne.imgw.pl/api/data/hydro/"
+    HYDROPORTAL_WMS_URL: str = "https://wody.isok.gov.pl/wss/INSPIRE/INSPIRE_HY_10k_2019_WMS"
     OVERPASS_API_URL: str = "https://overpass-api.de/api/interpreter"
 
 
