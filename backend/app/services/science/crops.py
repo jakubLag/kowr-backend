@@ -1,203 +1,103 @@
 """
-Słownik współczynników roślinnych Kc (FAO-56) oraz referencyjnych wartości NDVI
-dla głównych upraw w Polsce, oparty na wytycznych monitoringowych Copernicus / IUNG-PIB.
+Moduł fenologii upraw i współczynników Kc (FAO-56) oraz referencyjnych NDVI.
+Dostosowany do specyfiki agroklimatycznej Polski (rozróżnienie form ozimych i jarych, 
+uwzględnienie okresu pożniwnego / ścierniska oraz spoczynku zimowego).
 """
 
-from typing import Dict, Any
-
-CROP_DATABASE: Dict[str, Dict[str, Any]] = {
+# Harmonogramy miesięczne współczynnika ewapotranspiracji uprawy (Kc) wg FAO-56
+# Klucze: numery miesięcy (1 do 12)
+CROP_KC_SCHEDULE = {
+    "pszenica ozima": {
+        1: 0.30, 2: 0.35, 3: 0.70, 4: 0.95, 5: 1.15, 6: 1.10, 7: 0.45, 8: 0.30, 9: 0.40, 10: 0.70, 11: 0.50, 12: 0.35
+    },
+    "pszenica jara": {
+        1: 0.20, 2: 0.20, 3: 0.30, 4: 0.45, 5: 0.85, 6: 1.15, 7: 0.95, 8: 0.25, 9: 0.20, 10: 0.20, 11: 0.20, 12: 0.20
+    },
+    "rzepak ozimy": {
+        1: 0.30, 2: 0.35, 3: 0.75, 4: 1.10, 5: 1.15, 6: 0.75, 7: 0.30, 8: 0.25, 9: 0.35, 10: 0.60, 11: 0.50, 12: 0.35
+    },
     "kukurydza": {
-        "id": "kukurydza",
-        "name_pl": "Kukurydza na ziarno / kiszonkę",
-        "kc_initial": 0.35,
-        "kc_mid": 1.20,
-        "kc_end": 0.60,
-        "root_depth_m": 0.9,
-        "drought_sensitivity": "WYSOKA",
-        "critical_phase": "Kwitnienie i nalewanie ziarna (lipiec-sierpień)",
-        "optimal_awc_mm": 120.0,
-        # Referencyjne wartości NDVI zależne od fazy (miesiąca)
-        "ndvi_reference": {
-            "early": 0.30,   # Maj (wschody / początek wzrostu)
-            "mid": 0.82,     # Lipiec-Sierpień (szczyt biomasy / kwitnienie)
-            "late": 0.45     # Wrzesień-Październik (dojrzewanie / zżółknięcie)
-        }
+        1: 0.20, 2: 0.20, 3: 0.20, 4: 0.30, 5: 0.45, 6: 0.90, 7: 1.20, 8: 1.10, 9: 0.60, 10: 0.25, 11: 0.20, 12: 0.20
     },
-    "pszenica_ozima": {
-        "id": "pszenica_ozima",
-        "name_pl": "Pszenica ozima",
-        "kc_initial": 0.40,
-        "kc_mid": 1.15,
-        "kc_end": 0.30,
-        "root_depth_m": 1.0,
-        "drought_sensitivity": "ŚREDNIA",
-        "critical_phase": "Strzelanie w źdźbło i kłoszenie (maj-czerwiec)",
-        "optimal_awc_mm": 110.0,
-        "ndvi_reference": {
-            "early": 0.65,   # Kwiecień (intensywne krzewienie / początek strzelania w źdźbło)
-            "mid": 0.78,     # Czerwiec (pełne kłoszenie)
-            "late": 0.25     # Sierpień (po żniwach / ściernisko)
-        }
+    "burak cukrowy": {
+        1: 0.20, 2: 0.20, 3: 0.20, 4: 0.35, 5: 0.70, 6: 1.05, 7: 1.20, 8: 1.15, 9: 0.90, 10: 0.50, 11: 0.25, 12: 0.20
     },
-    "pszenica_jara": {
-        "id": "pszenica_jara",
-        "name_pl": "Pszenica jara",
-        "kc_initial": 0.35,
-        "kc_mid": 1.15,
-        "kc_end": 0.30,
-        "root_depth_m": 0.8,
-        "drought_sensitivity": "WYSOKA",
-        "critical_phase": "Kłoszenie i nalewanie ziarna (czerwiec-lipiec)",
-        "optimal_awc_mm": 110.0,
-        "ndvi_reference": {
-            "early": 0.40,   # Maj
-            "mid": 0.75,     # Czerwiec-Lipiec
-            "late": 0.30     # Sierpień
-        }
+    "ziemiak": {
+        1: 0.20, 2: 0.20, 3: 0.20, 4: 0.30, 5: 0.50, 6: 1.05, 7: 1.15, 8: 0.85, 9: 0.45, 10: 0.20, 11: 0.20, 12: 0.20
     },
-    "rzepak": {
-        "id": "rzepak",
-        "name_pl": "Rzepak ozimy",
-        "kc_initial": 0.35,
-        "kc_mid": 1.10,
-        "kc_end": 0.35,
-        "root_depth_m": 1.2,
-        "drought_sensitivity": "ŚREDNIA",
-        "critical_phase": "Kwitnienie i zawiązywanie łuszczyn (kwiecień-maj)",
-        "optimal_awc_mm": 130.0,
-        "ndvi_reference": {
-            "early": 0.70,   # Kwiecień (pełnia kwitnienia - uwaga na specyfikę spektralną żółtych kwiatów)
-            "mid": 0.75,     # Maj (zawiązywanie łuszczyn)
-            "late": 0.25     # Lipiec (zbiór)
-        }
+    "żyto": {
+        1: 0.30, 2: 0.35, 3: 0.65, 4: 0.90, 5: 1.10, 6: 1.05, 7: 0.45, 8: 0.30, 9: 0.40, 10: 0.65, 11: 0.50, 12: 0.35
     },
-    "burak_cukrowy": {
-        "id": "burak_cukrowy",
-        "name_pl": "Burak cukrowy",
-        "kc_initial": 0.35,
-        "kc_mid": 1.20,
-        "kc_end": 0.70,
-        "root_depth_m": 1.0,
-        "drought_sensitivity": "WYSOKA",
-        "critical_phase": "Zwarcie międzyrzędzi i przyrost korzenia (lipiec-sierpień)",
-        "optimal_awc_mm": 140.0,
-        "ndvi_reference": {
-            "early": 0.35,   # Czerwiec
-            "mid": 0.80,     # Lipiec-Sierpień (pełne zwarcie liści)
-            "late": 0.65     # Wrzesień
-        }
-    },
-    "ziemniak": {
-        "id": "ziemniak",
-        "name_pl": "Ziemniak",
-        "kc_initial": 0.45,
-        "kc_mid": 1.15,
-        "kc_end": 0.75,
-        "root_depth_m": 0.6,
-        "drought_sensitivity": "BARDZO WYSOKA",
-        "critical_phase": "Zawiązywanie i przyrost bulw (czerwiec-sierpień)",
-        "optimal_awc_mm": 100.0,
-        "ndvi_reference": {
-            "early": 0.40,   # Maj
-            "mid": 0.75,     # Czerwiec-Lipiec
-            "late": 0.40     # Wrzesień (zasychanie naci)
-        }
-    },
-    "jeczmien": {
-        "id": "jeczmien",
-        "name_pl": "Jęczmień",
-        "kc_initial": 0.30,
-        "kc_mid": 1.15,
-        "kc_end": 0.25,
-        "root_depth_m": 0.8,
-        "drought_sensitivity": "ŚREDNIA",
-        "critical_phase": "Kłoszenie (maj-czerwiec)",
-        "optimal_awc_mm": 100.0,
-        "ndvi_reference": {
-            "early": 0.55,   # Kwiecień
-            "mid": 0.72,     # Czerwiec
-            "late": 0.25     # Sierpień
-        }
-    },
-    "zyto": {
-        "id": "zyto",
-        "name_pl": "Żyto ozime",
-        "kc_initial": 0.30,
-        "kc_mid": 1.05,
-        "kc_end": 0.25,
-        "root_depth_m": 1.1,
-        "drought_sensitivity": "NISKA",
-        "critical_phase": "Strzelanie w źdźbło (maj)",
-        "optimal_awc_mm": 90.0,
-        "ndvi_reference": {
-            "early": 0.60,   # Kwiecień
-            "mid": 0.70,     # Czerwiec
-            "late": 0.25     # Sierpień
-        }
-    },
-    "soja": {
-        "id": "soja",
-        "name_pl": "Soja",
-        "kc_initial": 0.35,
-        "kc_mid": 1.15,
-        "kc_end": 0.50,
-        "root_depth_m": 0.8,
-        "drought_sensitivity": "WYSOKA",
-        "critical_phase": "Kwitnienie i wiązanie strąków (lipiec-sierpień)",
-        "optimal_awc_mm": 120.0,
-        "ndvi_reference": {
-            "early": 0.30,   # Czerwiec
-            "mid": 0.78,     # Lipiec-Sierpień
-            "late": 0.50     # Wrzesień
-        }
-    },
-    "laka": {
-        "id": "laka",
-        "name_pl": "Trwałe użytki zielone (łąki / pastwiska)",
-        "kc_initial": 0.60,
-        "kc_mid": 1.00,
-        "kc_end": 0.85,
-        "root_depth_m": 0.5,
-        "drought_sensitivity": "ŚREDNIA",
-        "critical_phase": "Odrost po pokosach (cały sezon wegetacyjny)",
-        "optimal_awc_mm": 110.0,
-        "ndvi_reference": {
-            "early": 0.65,   # Maj
-            "mid": 0.75,     # Czerwiec-Lipiec
-            "late": 0.60     # Wrzesień
-        }
+    "jęczmień jary": {
+        1: 0.20, 2: 0.20, 3: 0.30, 4: 0.45, 5: 0.85, 6: 1.10, 7: 0.80, 8: 0.25, 9: 0.20, 10: 0.20, 11: 0.20, 12: 0.20
     }
 }
 
-def get_crop_kc(crop_name: str, month: int = 7) -> float:
-    """
-    Zwraca odpowiedni współczynnik Kc dla danej uprawy w zależności od miesiąca.
-    """
-    crop_key = crop_name.lower().replace(" ", "_").replace("-", "_")
-    crop = CROP_DATABASE.get(crop_key, CROP_DATABASE["kukurydza"])
+# Normy referencyjne NDVI (wartości medianowe z satelity Sentinel-2 dla zdrowej uprawy w Polsce)
+CROP_NDVI_REFERENCE = {
+    "pszenica ozima": {
+        1: 0.25, 2: 0.30, 3: 0.50, 4: 0.72, 5: 0.85, 6: 0.80, 7: 0.45, 8: 0.22, 9: 0.30, 10: 0.55, 11: 0.45, 12: 0.30
+    },
+    "pszenica jara": {
+        1: 0.15, 2: 0.15, 3: 0.20, 4: 0.35, 5: 0.65, 6: 0.82, 7: 0.75, 8: 0.25, 9: 0.18, 10: 0.18, 11: 0.15, 12: 0.15
+    },
+    "rzepak ozimy": {
+        1: 0.25, 2: 0.32, 3: 0.60, 4: 0.82, 5: 0.88, 6: 0.55, 7: 0.25, 8: 0.20, 9: 0.30, 10: 0.50, 11: 0.45, 12: 0.30
+    },
+    "kukurydza": {
+        1: 0.15, 2: 0.15, 3: 0.15, 4: 0.20, 5: 0.35, 6: 0.75, 7: 0.88, 8: 0.85, 9: 0.50, 10: 0.22, 11: 0.15, 12: 0.15
+    },
+    "burak cukrowy": {
+        1: 0.15, 2: 0.15, 3: 0.15, 4: 0.25, 5: 0.50, 6: 0.80, 7: 0.88, 8: 0.85, 9: 0.75, 10: 0.40, 11: 0.20, 12: 0.15
+    },
+    "ziemiak": {
+        1: 0.15, 2: 0.15, 3: 0.15, 4: 0.20, 5: 0.40, 6: 0.82, 7: 0.85, 8: 0.65, 9: 0.30, 10: 0.18, 11: 0.15, 12: 0.15
+    },
+    "żyto": {
+        1: 0.30, 2: 0.35, 3: 0.55, 4: 0.75, 5: 0.85, 6: 0.78, 7: 0.45, 8: 0.22, 9: 0.30, 10: 0.55, 11: 0.45, 12: 0.30
+    },
+    "jęczmień jary": {
+        1: 0.15, 2: 0.15, 3: 0.20, 4: 0.35, 5: 0.65, 6: 0.80, 7: 0.60, 8: 0.25, 9: 0.18, 10: 0.18, 11: 0.15, 12: 0.15
+    }
+}
+
+def normalize_crop_name(crop_name: str) -> str:
+    """Normalizuje nazwę uprawy do klucza słownikowego (usuwa wielkość liter, polskie znaki itp.)."""
+    if not crop_name:
+        return "pszenica ozima"  # Domyślny fallback
     
-    if month <= 4:
-        return crop["kc_initial"]
-    elif month in [5, 6]:
-        return (crop["kc_initial"] + crop["kc_mid"]) / 2.0
-    elif month in [7, 8]:
-        return crop["kc_mid"]
-    else:
-        return crop["kc_end"]
+    cleaned = crop_name.lower().strip()
+    # Mapowania alternatywnych nazw od użytkownika / frontendu
+    mapping = {
+        "pszenica": "pszenica ozima",
+        "pszenica ozima": "pszenica ozima",
+        "pszenica jara": "pszenica jara",
+        "rzepak": "rzepak ozimy",
+        "rzepak ozimy": "rzepak ozimy",
+        "kukurydza": "kukurydza",
+        "burak": "burak cukrowy",
+        "burak cukrowy": "burak cukrowy",
+        "ziemniak": "ziemiak",
+        "ziemniaki": "ziemiak",
+        "żyto": "żyto",
+        "jęczmień": "jęczmień jary",
+        "jęczmień jary": "jęczmień jary"
+    }
+    
+    for key, val in mapping.items():
+        if key in cleaned:
+            return val
+            
+    return "pszenica ozima"  # Uniwersalny domyślny fallback dla zbóż
 
+def get_crop_kc(crop_name: str, month: int) -> float:
+    """Zwraca współczynnik Kc dla danej uprawy i miesiąca."""
+    crop_key = normalize_crop_name(crop_name)
+    schedule = CROP_KC_SCHEDULE.get(crop_key, CROP_KC_SCHEDULE["pszenica ozima"])
+    return schedule.get(month, 0.50)
 
-def get_crop_ndvi_reference(crop_name: str, month: int = 7) -> float:
-    """
-    Zwraca referencyjną (zdrową) wartość NDVI dla danej uprawy i miesiąca,
-    zastępując dotychczasową sztywną medianę 0.68 precyzyjnym profilem roślinnym.
-    """
-    crop_key = crop_name.lower().replace(" ", "_").replace("-", "_")
-    crop = CROP_DATABASE.get(crop_key, CROP_DATABASE["kukurydza"])
-    ndvi_ref = crop.get("ndvi_reference", {"early": 0.4, "mid": 0.75, "late": 0.4})
-
-    if month <= 4:
-        return ndvi_ref["early"]
-    elif month in [5, 6, 7, 8]:
-        return ndvi_ref["mid"]
-    else:
-        return ndvi_ref["late"]
+def get_crop_ndvi_reference(crop_name: str, month: int) -> float:
+    """Zwraca referencyjną wartość NDVI dla danej uprawy i miesiąca."""
+    crop_key = normalize_crop_name(crop_name)
+    schedule = CROP_NDVI_REFERENCE.get(crop_key, CROP_NDVI_REFERENCE["pszenica ozima"])
+    return schedule.get(month, 0.50)

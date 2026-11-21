@@ -34,7 +34,7 @@ async def analyze_parcel(request: AnalyzeRequest):
     Główny punkt wejścia analizy KOWR:
     1. Pobiera dane przestrzenne działki (ULDK GUGiK)
     2. Równolegle (asyncio.gather z return_exceptions=True) odpytuje 5 źródeł danych.
-    3. Deterministycznie wylicza KBW, AWC Saxtona-Rawlsa, NDVI/NDMI.
+    3. Deterministycznie wylicza KBW, AWC Saxtona-Rawlsa, NDVI/NDMI oraz 10-letnią klimatologię.
     4. Zwraca raport w obowiązkowej sekwencji KOWR wraz z obsługą ograniczeń i fallbacków.
     """
     start_time = time.time()
@@ -49,22 +49,20 @@ async def analyze_parcel(request: AnalyzeRequest):
     lon = parcel.center.lon
 
     # Data analizy i współczynnik Kc
-    if request.target_date:
-        try:
-            target_dt = datetime.strptime(request.target_date, "%Y-%m-%d")
-            month = target_dt.month
-        except ValueError:
-            month = 7
-    else:
-        month = datetime.now().month
+    target_date_str = request.target_date or date.today().isoformat()
+    try:
+        target_dt = datetime.strptime(target_date_str, "%Y-%m-%d")
+        month = target_dt.month
+    except ValueError:
+        target_dt = datetime.now()
+        month = target_dt.month
 
+    target_date_converted = date.fromisoformat(target_date_str)
     kc = get_crop_kc(request.crop, month=month)
 
-    # 2. Równoległe pobranie pozostałych 4 źródeł danych z return_exceptions=True (Graceful Degradation)
-    target_date_converted = date.fromisoformat(request.target_date)
-    
+    # 2. Równoległe pobranie 5 źródeł danych z return_exceptions=True (Graceful Degradation)
     weather_task = fetch_10y_climatology(lat, lon, target_date_converted)
-    sentinel_task = fetch_sentinel_indices(lat, lon, request.target_date, crop_name=request.crop)
+    sentinel_task = fetch_sentinel_indices(lat, lon, target_date_str, crop_name=request.crop)
     soil_task = fetch_soil_properties(lat, lon)
     terrain_task = fetch_terrain_and_hydro(lat, lon, ditch_distance_m=request.ditch_distance_m)
 
@@ -81,13 +79,14 @@ async def analyze_parcel(request: AnalyzeRequest):
     # Lista ograniczeń (limitations) i rejestrowanie ewentualnych wyjątków z usług
     limitations = []
 
-    # Bezpieczna obsługa pogody
+    # Bezpieczna obsługa pogody i klimatologii 10-letniej
     if isinstance(weather_data, Exception) or not weather_data:
         limitations.append("Meteorologia (Open-Meteo): Usługa chwilowo niedostępna – użyto referencyjnego modelu agrometeorologicznego.")
         weather_data = {
             "precipitation_30d_mm": 35.0, "precipitation_60d_mm": 70.0,
             "et0_30d_mm": 110.0, "et0_60d_mm": 210.0, "mean_temperature_c": 19.0,
-            "is_fallback": True
+            "drought_frequency_10y_pct": None, "riskiest_months": [], "max_dry_spell_days": None,
+            "raw_daily_series": [], "is_fallback": True
         }
     elif weather_data.get("is_fallback"):
         limitations.append("Meteorologia: Wykorzystano zastępczy model agroklimatyczny z powodu niedostępności dostawcy.")
@@ -113,15 +112,15 @@ async def analyze_parcel(request: AnalyzeRequest):
                 "is_fallback": True
             }
 
-    # Bezpieczna obsługa rzeźby terenu / hydro
+    # Bezpieczna obsługa rzeźby terenu / hydro (Eliminacja sztucznego hardcode'u 1.8% na rzecz None)
     if isinstance(terrain_data, Exception) or not terrain_data:
-        limitations.append("Rzeźba terenu i hydrografia: Usługi NMT/IMGW niedostępne – przyjęto płaski teren (spadek 1.8%) bez rowów.")
+        limitations.append("Rzeźba terenu i hydrografia: Usługi NMT/IMGW niedostępne – brak możliwości wyznaczenia spadku terenu i odległości do cieków.")
         terrain_data = {
-            "slope_percent": 1.8, "is_slope_fallback": True, "distance_to_ditch_m": None
+            "slope_percent": None, "is_slope_fallback": True, "distance_to_ditch_m": None
         }
     else:
-        if terrain_data.get("is_slope_fallback"):
-            limitations.append("Numeryczny Model Terenu (NMT): Usługi wysokościowe niedostępne – spadek terenu oszacowano wartością 1.8%.")
+        if terrain_data.get("is_slope_fallback") or terrain_data.get("slope_percent") is None:
+            limitations.append("Numeryczny Model Terenu (NMT): Usługi wysokościowe niedostępne – spadek terenu oznaczono jako nieznany.")
         if terrain_data.get("distance_to_ditch_m") is None:
             limitations.append("Hydrografia: W buforze 500 m od działki nie zidentyfikowano rowów melioracyjnych ani cieków wodnych.")
 
@@ -162,14 +161,24 @@ async def analyze_parcel(request: AnalyzeRequest):
         area_ha=parcel.area_ha
     )
 
-    # 5. Generowanie ustrukturyzowanych kart zaleceń (Report Generator)
-    retention_actions = generate_retention_actions(rules_eval["active_rules"])
+    # 5. Generowanie ustrukturyzowanych kart zaleceń (zasilone parametry ekoschematów i okna pogodowego)
+    retention_actions = generate_retention_actions(
+        rules_eval["active_rules"],
+        soil_category=soil_data["soil_category"],
+        area_ha=parcel.area_ha
+    )
+    
+    forecast_7d_precip = weather_data.get("forecast_7d_precip_mm", 0.0)
+    wind_max_ms = weather_data.get("wind_max_ms", 3.0)
+    
     irrigation_rec = generate_irrigation_recommendation(
         irrigation_needed=rules_eval["irrigation_needed"],
         deficit_mm=rules_eval["deficit_mm"],
         awc_mm=soil_data["awc_mm"],
         soil_category=soil_data["soil_category"],
-        crop_name=request.crop
+        crop_name=request.crop,
+        forecast_7d_precip_mm=forecast_7d_precip,
+        wind_max_ms=wind_max_ms
     )
 
     # Diagnoza (Etap 1) + Szereg 60 dni historii i 60 dni prognozy długoterminowej (6 dekad)
@@ -205,11 +214,10 @@ async def analyze_parcel(request: AnalyzeRequest):
             pt_month = int(pt["date"].split("-")[1])
         except Exception:
             pt_month = month
-        day_kc = get_crop_kc(request.crop, month=pt_month) if pt["is_forecast"] else kc
+        day_kc = get_crop_kc(request.crop, month=pt_month) if pt.get("is_forecast") else kc
         kbw_d = round(p_val - (et0_val * day_kc), 1)
         daily_kbw_values.append(kbw_d)
 
-        # Kroczący bilans 60-dniowy (okno ruchome do 60 dni wstecz, zgodnie z metodyką IUNG-PIB)
         window_start = max(0, idx - 59)
         rolling_60d = round(sum(daily_kbw_values[window_start : idx + 1]), 1)
 
@@ -219,7 +227,7 @@ async def analyze_parcel(request: AnalyzeRequest):
             et0_mm=et0_val,
             kbw_daily_mm=kbw_d,
             kbw_cumulative_mm=rolling_60d,
-            is_forecast=pt["is_forecast"],
+            is_forecast=pt.get("is_forecast", False),
             temp_max_c=pt.get("temp_max_c"),
             wind_max_ms=pt.get("wind_max_ms"),
         ))
@@ -247,7 +255,6 @@ async def analyze_parcel(request: AnalyzeRequest):
         dec_etc = round(dec_et0 * dec_kc, 1)
         dec_kbw = round(dec_p - dec_etc, 1)
 
-        # Kroczący bilans 60-dniowy przesuwa się o kolejną dekadę
         rolling_kbw_60d = round(rolling_kbw_60d * (50.0 / 60.0) + dec_kbw, 1)
 
         if rolling_kbw_60d < crit_threshold_60d:
@@ -260,7 +267,7 @@ async def analyze_parcel(request: AnalyzeRequest):
         day_from = dec_idx * 10 + 1
         day_to = dec_idx * 10 + len(chunk)
         if dec_idx >= 2:
-            period_label_txt = f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni) – Scenariusz agroklimatyczny"
+            period_label_txt = f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni) – Scenariusz agroklimatyczny (normy wieloletnie)"
         else:
             period_label_txt = f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni) – Prognoza synoptyczna"
 
@@ -298,7 +305,7 @@ async def analyze_parcel(request: AnalyzeRequest):
         primary_causes=rules_eval["primary_causes"],
         precipitation_30d_mm=weather_data.get("precipitation_30d_mm"),
         et0_30d_mm=weather_data.get("et0_30d_mm"),
-        forecast_7d_precip_mm=weather_data.get("forecast_7d_precip_mm"),
+        forecast_7d_precip_mm=forecast_7d_precip,
         forecast_7d_et0_mm=weather_data.get("forecast_7d_et0_mm"),
         forecast_60d_precip_mm=weather_data.get("forecast_60d_precip_mm"),
         forecast_60d_et0_mm=weather_data.get("forecast_60d_et0_mm"),
@@ -306,23 +313,40 @@ async def analyze_parcel(request: AnalyzeRequest):
         critical_threshold_kbw_60d_mm=crit_threshold_60d,
         daily_weather_series=daily_series or None,
         forecast_60d_decades=decades_list or None,
+        # Pola wieloletniej klimatologii działki (wymóg PDF pkt 3.2.1a)
+        drought_frequency_10y_pct=weather_data.get("drought_frequency_10y_pct"),
+        riskiest_months=weather_data.get("riskiest_months"),
+        max_dry_spell_days=weather_data.get("max_dry_spell_days")
     )
 
     sources = [
         "Granice działki: ULDK GUGiK (Główny Urząd Geodezji i Kartografii)",
-        "Meteorologia: Open-Meteo Archive / Forecast API (metodyka FAO-56 Penman-Monteith)",
+        "Meteorologia i klimatologia 10-letnia: Open-Meteo Archive / Forecast API (metodyka FAO-56 Penman-Monteith)",
         "Teledetekcja: Copernicus Data Space Ecosystem (CDSE) / Sentinel-2 L2A Process API",
         "Gleba i uziarnienie: ISRIC SoilGrids v2.0 REST API + równania Saxtona & Rawlsa (2006)",
-        "Hydrografia i rzeźba: IMGW-PIB Hydro / PGW Wody Polskie Hydroportal + Geoportal NMT"
+        "Hydrografia i rzeźba: IMGW-PIB Hydro / PGW Wody Polskie Hydroportal + Geoportal NMT WCS"
     ]
 
     exec_time_ms = int((time.time() - start_time) * 1000)
 
+    # Obliczenie wskaźnika pewności/niepewności wyniku (Transparency & Confidence Score)
+    fallback_count = sum(1 for l in limitations if "błąd" in l.lower() or "niedostępna" in l.lower() or "zastępczy" in l.lower() or "nieznany" in l.lower())
+    cloud_cover = sentinel_data.get("cloud_cover_percent") or 0.0
+    
+    if fallback_count == 0 and cloud_cover < 15.0:
+        confidence_level = "Wysoka"
+    elif fallback_count <= 2 and cloud_cover < 40.0:
+        confidence_level = "Średnia"
+    else:
+        confidence_level = "Obniżona (wystąpiły ograniczenia źródeł danych)"
+
     metadata = ReportMetadata(
         sources=sources,
         analysis_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        target_analysis_date=target_date_str,
         sentinel_scene_date=sentinel_data.get("scene_date"),
-        cloud_cover_percent=sentinel_data.get("cloud_cover_percent"),
+        cloud_cover_percent=cloud_cover,
+        confidence_level=confidence_level,
         limitations=limitations,
         execution_time_ms=exec_time_ms
     )
