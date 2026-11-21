@@ -7,27 +7,59 @@ import {
 } from "@/types/analysis";
 
 interface Step3IrrigationProps {
-  irrigation: IrrigationRecommendation;
-  areaHa: number;
-  cropName: string;
-  forecastDecades: DecadeForecastPoint[];
+  irrigation?: IrrigationRecommendation | null;
+  areaHa?: number | null;
+  cropName?: string;
+  forecastDecades?: DecadeForecastPoint[] | null;
 }
 
 export default function Step3Irrigation({
   irrigation,
-  areaHa,
-  cropName,
-  forecastDecades,
+  areaHa = 1.0,
+  cropName = "uprawa",
+  forecastDecades = [],
 }: Step3IrrigationProps) {
-  const totalCubicMeters = Math.round(irrigation.dose_m3_per_ha * areaHa);
+  if (!irrigation) {
+    return null;
+  }
+
+  const safeAreaHa =
+    typeof areaHa === "number" && !isNaN(areaHa) && areaHa > 0 ? areaHa : 1.0;
+  const safeDoseMm =
+    typeof irrigation.dose_mm === "number" && !isNaN(irrigation.dose_mm)
+      ? irrigation.dose_mm
+      : 0.0;
+  const safeDoseM3 =
+    typeof irrigation.dose_m3_per_ha === "number" &&
+    !isNaN(irrigation.dose_m3_per_ha)
+      ? irrigation.dose_m3_per_ha
+      : safeDoseMm * 10.0;
+  const totalCubicMeters = Math.round(safeDoseM3 * safeAreaHa);
+
+  const safeDecades = Array.isArray(forecastDecades) ? forecastDecades : [];
 
   const total60dPrecip = Number(
-    forecastDecades
-      .reduce((acc, d) => acc + d.precipitation_mm, 0)
+    safeDecades
+      .reduce(
+        (acc, d) =>
+          acc +
+          (typeof d?.precipitation_mm === "number" && !isNaN(d.precipitation_mm)
+            ? d.precipitation_mm
+            : 0),
+        0
+      )
       .toFixed(1)
   );
+
   const total60dEtc = Number(
-    forecastDecades.reduce((acc, d) => acc + d.etc_mm, 0).toFixed(1)
+    safeDecades
+      .reduce(
+        (acc, d) =>
+          acc +
+          (typeof d?.etc_mm === "number" && !isNaN(d.etc_mm) ? d.etc_mm : 0),
+        0
+      )
+      .toFixed(1)
   );
 
   return (
@@ -49,16 +81,18 @@ export default function Step3Irrigation({
                 🌧️ Okno pogodowe: Wstrzymaj nawadnianie (prognozowany deszcz)
               </div>
               <p className="text-sm text-amber-800 leading-relaxed">
-                {irrigation.justification}
+                {irrigation.justification ||
+                  "W najbliższych dniach prognozowane są opady deszczu, które pokryją zapotrzebowanie uprawy."}
               </p>
             </div>
           ) : (
             <div className="gov-callout-info">
               <div className="text-sm font-bold text-gov-navy">
-                Status: {irrigation.status}
+                Status: {irrigation.status || "Zalecane nawadnianie interwencyjne"}
               </div>
               <p className="text-sm text-gov-text mt-1 leading-relaxed">
-                {irrigation.justification}
+                {irrigation.justification ||
+                  "Zaleca się nawodnienie interwencyjne w celu ochrony plonu przed trwałym uwiądem."}
               </p>
             </div>
           )}
@@ -74,22 +108,21 @@ export default function Step3Irrigation({
               <tr>
                 <td className="font-bold">Zalecana dawka jednostkowa</td>
                 <td className="font-mono font-bold text-base text-gov-navy">
-                  {irrigation.dose_mm.toFixed(1)} mm{" "}
+                  {safeDoseMm.toFixed(1)} mm{" "}
                   <span className="text-sm font-normal text-gov-secondary">
-                    (odpowiada {irrigation.dose_mm.toFixed(1)} litrom wody na 1
-                    m²)
+                    (odpowiada {safeDoseMm.toFixed(1)} litrom wody na 1 m²)
                   </span>
                 </td>
               </tr>
               <tr>
                 <td className="font-bold">Objętość wody na 1 hektar</td>
                 <td className="font-mono font-bold text-gov-navy">
-                  {Math.round(irrigation.dose_m3_per_ha)} m³ / ha
+                  {Math.round(safeDoseM3)} m³ / ha
                 </td>
               </tr>
               <tr>
                 <td className="font-bold">
-                  Całkowita objętość dla działki ({areaHa} ha)
+                  Całkowita objętość dla działki ({safeAreaHa} ha)
                 </td>
                 <td className="font-mono font-bold text-gov-blue">
                   {totalCubicMeters} m³ wody
@@ -98,13 +131,15 @@ export default function Step3Irrigation({
               <tr>
                 <td className="font-bold">Rekomendowana technika</td>
                 <td className="font-semibold text-gov-text">
-                  {irrigation.recommended_technique}
+                  {irrigation.recommended_technique ||
+                    "Linie kroplujące lub deszczownia niskociśnieniowa"}
                 </td>
               </tr>
               <tr>
                 <td className="font-bold">Optymalna pora wykonania zabiegu</td>
                 <td className="font-semibold text-gov-text">
-                  {irrigation.recommended_timing}
+                  {irrigation.recommended_timing ||
+                    "Wyłącznie godziny wczesnoporanne lub nocne"}
                 </td>
               </tr>
             </tbody>
@@ -113,16 +148,17 @@ export default function Step3Irrigation({
       ) : (
         <div className="gov-callout-success">
           <div className="text-sm font-bold text-gov-navy">
-            Status: {irrigation.status}
+            Status: {irrigation.status || "Nawadnianie nie jest obecnie konieczne"}
           </div>
           <p className="text-sm text-gov-text mt-1 leading-relaxed">
-            {irrigation.justification}
+            {irrigation.justification ||
+              "Bilans wodny gleby jest stabilny lub niedobór mieści się w granicach tolerancji roślin. Priorytetem pozostaje retencja glebowa i krajobrazowa z Etapu 2."}
           </p>
         </div>
       )}
 
       {/* 3.1. Długoterminowa prognoza potrzeb wodnych na 60 dni (6 dekad po 10 dni) */}
-      {forecastDecades.length > 0 && (
+      {safeDecades.length > 0 && (
         <div className="space-y-3 pt-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-base font-bold text-gov-navy">
@@ -161,17 +197,30 @@ export default function Step3Irrigation({
               </tr>
             </thead>
             <tbody>
-              {forecastDecades.map((dec) => {
-                const isHighRisk = dec.risk_status
-                  .toLowerCase()
-                  .includes("wysokie");
-                const isMediumRisk = dec.risk_status
-                  .toLowerCase()
-                  .includes("rosnący");
+              {safeDecades.map((dec, idx) => {
+                const riskStatus = dec?.risk_status || "Stabilny";
+                const isHighRisk = riskStatus.toLowerCase().includes("wysokie");
+                const isMediumRisk = riskStatus.toLowerCase().includes("rosnący");
+                const cropKc =
+                  typeof dec?.crop_kc === "number" ? dec.crop_kc : 1.0;
+                const precip =
+                  typeof dec?.precipitation_mm === "number"
+                    ? dec.precipitation_mm
+                    : 0.0;
+                const etc =
+                  typeof dec?.etc_mm === "number" ? dec.etc_mm : 0.0;
+                const kbwDec =
+                  typeof dec?.kbw_decade_mm === "number"
+                    ? dec.kbw_decade_mm
+                    : 0.0;
+                const kbw60d =
+                  typeof dec?.kbw_60d_rolling_mm === "number"
+                    ? dec.kbw_60d_rolling_mm
+                    : 0.0;
 
                 return (
                   <tr
-                    key={dec.decade_number}
+                    key={dec?.decade_number ?? idx + 1}
                     className={
                       isHighRisk
                         ? "bg-gov-danger-bg/40"
@@ -182,41 +231,41 @@ export default function Step3Irrigation({
                   >
                     <td>
                       <div className="font-bold text-gov-navy text-xs">
-                        {dec.period_label}
+                        {dec?.period_label || `Dekada ${idx + 1}`}
                       </div>
                       <div className="font-mono text-[11px] text-gov-secondary">
-                        {dec.start_date} – {dec.end_date}
+                        {dec?.start_date || "—"} – {dec?.end_date || "—"}
                       </div>
                     </td>
                     <td>
                       <div className="text-xs font-medium text-gov-text">
-                        {dec.growth_stage}
+                        {dec?.growth_stage || "Faza wegetatywna"}
                       </div>
                       <div className="font-mono text-[11px] text-gov-secondary">
-                        Kc = {dec.crop_kc.toFixed(2)}
+                        Kc = {cropKc.toFixed(2)}
                       </div>
                     </td>
                     <td className="text-right font-mono font-bold text-gov-blue">
-                      +{dec.precipitation_mm.toFixed(1)} mm
+                      +{precip.toFixed(1)} mm
                     </td>
                     <td className="text-right font-mono text-gov-secondary">
-                      -{dec.etc_mm.toFixed(1)} mm
+                      -{etc.toFixed(1)} mm
                     </td>
                     <td
                       className={`text-right font-mono font-bold ${
-                        dec.kbw_decade_mm < -15
+                        kbwDec < -15
                           ? "text-gov-danger"
-                          : dec.kbw_decade_mm < 0
+                          : kbwDec < 0
                             ? "text-gov-warning"
                             : "text-gov-success"
                       }`}
                     >
-                      {dec.kbw_decade_mm > 0 ? "+" : ""}
-                      {dec.kbw_decade_mm.toFixed(1)} mm
+                      {kbwDec > 0 ? "+" : ""}
+                      {kbwDec.toFixed(1)} mm
                     </td>
                     <td className="text-right font-mono font-bold text-gov-navy">
-                      {dec.kbw_60d_rolling_mm > 0 ? "+" : ""}
-                      {dec.kbw_60d_rolling_mm.toFixed(1)} mm
+                      {kbw60d > 0 ? "+" : ""}
+                      {kbw60d.toFixed(1)} mm
                     </td>
                     <td
                       className={`text-xs font-semibold ${
@@ -227,7 +276,7 @@ export default function Step3Irrigation({
                             : "text-gov-success"
                       }`}
                     >
-                      {dec.risk_status}
+                      {riskStatus}
                     </td>
                   </tr>
                 );

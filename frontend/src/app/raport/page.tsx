@@ -269,8 +269,8 @@ function ReportPageContent() {
                     {analysisResult.step1_diagnosis.kbw_30d_mm} mm
                   </strong>
                   ).{" "}
-                  {analysisResult.step3_irrigation.needed
-                    ? `W pierwszej kolejności wdróż priorytetowe zabiegi retencyjne z Etapu 2, a doraźnie zastosuj nawadnianie interwencyjne w dawce ${analysisResult.step3_irrigation.dose_mm} mm.`
+                  {analysisResult.step3_irrigation?.needed
+                    ? `W pierwszej kolejności wdróż priorytetowe zabiegi retencyjne z Etapu 2, a doraźnie zastosuj nawadnianie interwencyjne w dawce ${analysisResult.step3_irrigation.dose_mm ?? 0} mm.`
                     : "Dodatkowe nawadnianie interwencyjne nie jest obecnie wymagane — zaleca się wdrożenie praktyk retencyjnych wskazanych w Etapie 2."}
                 </p>
               </div>
@@ -290,12 +290,14 @@ function ReportPageContent() {
               diagnosis={analysisResult.step1_diagnosis}
             />
 
-            <Step3Irrigation
-              irrigation={analysisResult.step3_irrigation}
-              areaHa={analysisResult.parcel_info.area_ha}
-              cropName={cropLabel}
-              forecastDecades={forecastDecades}
-            />
+            {analysisResult.step3_irrigation && (
+              <Step3Irrigation
+                irrigation={analysisResult.step3_irrigation}
+                areaHa={analysisResult.parcel_info?.area_ha ?? parcel?.area_ha ?? 1.0}
+                cropName={cropLabel}
+                forecastDecades={forecastDecades}
+              />
+            )}
 
             <CropRotationComparison
               teryt={analysisResult.teryt}

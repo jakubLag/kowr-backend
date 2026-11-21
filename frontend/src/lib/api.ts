@@ -8,7 +8,7 @@ import {
 } from "@/types/analysis";
 
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "https://145.239.90.237.nip.io";
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export class ApiError extends Error {
   status: number;
