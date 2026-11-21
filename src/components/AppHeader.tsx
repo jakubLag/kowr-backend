@@ -2,7 +2,6 @@
 
 import React from "react";
 import Link from "next/link";
-import { API_BASE_URL } from "@/lib/api";
 import { ChevronRight } from "lucide-react";
 
 interface AppHeaderProps {
@@ -10,9 +9,6 @@ interface AppHeaderProps {
   teryt?: string | null;
   crop?: string | null;
   date?: string | null;
-  dataSourceMode?: "api" | "mock" | null;
-  forceMock: boolean;
-  onToggleForceMock: () => void;
 }
 
 export default function AppHeader({
@@ -20,9 +16,6 @@ export default function AppHeader({
   teryt,
   crop,
   date,
-  dataSourceMode,
-  forceMock,
-  onToggleForceMock,
 }: AppHeaderProps) {
   const step1Href = teryt ? `/?teryt=${encodeURIComponent(teryt)}` : "/";
   const step2Href = teryt
@@ -63,28 +56,6 @@ export default function AppHeader({
             <span className="text-xs sm:text-sm text-gov-text font-normal leading-tight truncate">
               Serwis Rzeczypospolitej Polskiej
             </span>
-          </div>
-
-          {/* Dyskretny przełącznik techniczny źródła danych (API / Mock) */}
-          <div className="flex items-center gap-3 text-xs shrink-0">
-            {dataSourceMode && (
-              <span className="hidden sm:inline-block text-gov-secondary">
-                Źródło danych:{" "}
-                <strong className="text-gov-text font-semibold">
-                  {dataSourceMode === "api"
-                    ? `FastAPI (${API_BASE_URL})`
-                    : "Dane demonstracyjne (Mock)"}
-                </strong>
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onToggleForceMock}
-              className="px-2.5 py-1 text-xs border border-gov-border bg-gov-surface hover:bg-gov-blue-light text-gov-text rounded-[2px] transition-colors"
-              title={`Adres backendu: ${API_BASE_URL}. Kliknij, aby przełączyć między trybem automatycznym a wymuszonym trybem demonstracyjnym.`}
-            >
-              {forceMock ? "Tryb: Tylko Mock" : "Tryb: Auto API"}
-            </button>
           </div>
         </div>
       </div>

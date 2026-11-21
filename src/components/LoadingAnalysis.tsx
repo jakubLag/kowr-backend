@@ -6,7 +6,6 @@ interface LoadingAnalysisProps {
   teryt: string;
   cropLabel: string;
   analysisDate: string;
-  onSkipDemo?: () => void;
 }
 
 const LOADING_STEPS = [
@@ -46,7 +45,6 @@ export default function LoadingAnalysis({
   teryt,
   cropLabel,
   analysisDate,
-  onSkipDemo,
 }: LoadingAnalysisProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [progress, setProgress] = useState(10);
@@ -164,22 +162,6 @@ export default function LoadingAnalysis({
           })}
         </tbody>
       </table>
-
-      {onSkipDemo && (
-        <div className="pt-2 flex items-center justify-between gap-4">
-          <span className="text-xs text-gov-secondary">
-            W trybie demonstracyjnym możesz pominąć czas oczekiwania na odpowiedź
-            modeli satelitarnych.
-          </span>
-          <button
-            type="button"
-            onClick={onSkipDemo}
-            className="gov-btn-secondary text-xs py-2 px-3.5 shrink-0"
-          >
-            Wyświetl raport natychmiast
-          </button>
-        </div>
-      )}
     </section>
   );
 }

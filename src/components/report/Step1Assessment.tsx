@@ -1,10 +1,12 @@
 "use client";
 
 import React from "react";
-import { RiskLevel, Step1WaterAssessment } from "@/types/analysis";
+import { DailyWeatherPoint, Diagnosis } from "@/types/analysis";
 import {
   BarChart,
   Bar,
+  ComposedChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -12,110 +14,97 @@ import {
   ResponsiveContainer,
   Cell,
   LabelList,
+  ReferenceLine,
 } from "recharts";
 
 interface Step1AssessmentProps {
-  assessment: Step1WaterAssessment;
+  diagnosis: Diagnosis;
   cropName: string;
+  kcCoefficient: number;
+  weatherSeries: DailyWeatherPoint[];
 }
 
-function getRiskDetails(level: RiskLevel) {
-  switch (level) {
-    case "HIGH":
-      return {
-        label: "Wysokie zagrożenie suszą rolniczą",
-        description:
-          "Stwierdzono znaczny niedobór wody w strefie korzeniowej oraz osłabienie kondycji roślin względem normy wieloletniej.",
-        calloutClass: "gov-callout-danger",
-        statusTextClass: "text-gov-danger font-bold",
-      };
-    case "MEDIUM":
-      return {
-        label: "Umiarkowane zagrożenie suszą",
-        description:
-          "Parowanie przewyższa sumę opadów z ostatnich 30 dni. Rośliny korzystają z zapasów wody zgromadzonych w glebie.",
-        calloutClass: "gov-callout-warning",
-        statusTextClass: "text-gov-warning font-bold",
-      };
-    case "LOW":
-      return {
-        label: "Niskie zagrożenie suszą (dobre uwodnienie)",
-        description:
-          "Zapas wilgoci w glebie oraz kondycja uprawy mieszczą się w normie wieloletniej dla tego okresu.",
-        calloutClass: "gov-callout-success",
-        statusTextClass: "text-gov-success font-bold",
-      };
+function getRiskDetails(level: string) {
+  const normalized = level.toUpperCase();
+  if (normalized === "WYSOKIE" || normalized === "HIGH") {
+    return {
+      label: "Wysokie zagrożenie suszą rolniczą",
+      calloutClass: "gov-callout-danger",
+      statusTextClass: "text-gov-danger font-bold",
+    };
   }
-}
-
-function getSoilRetentionDescription(capacity: RiskLevel) {
-  switch (capacity) {
-    case "LOW":
-      return {
-        label: "Niska (gleba lekka, przepuszczalna)",
-        detail:
-          "Woda opadowa szybko przesiąka poniżej strefy korzeniowej; gleba słabo magazynuje wilgoć.",
-      };
-    case "MEDIUM":
-      return {
-        label: "Średnia (gleba średniozwięzła)",
-        detail:
-          "Umiarkowana zdolność zatrzymywania wody opadowej w warstwie ornej.",
-      };
-    case "HIGH":
-      return {
-        label: "Wysoka (gleba zwięzła, zasobna w próchnicę)",
-        detail:
-          "Gleba dobrze magazynuje wodę opadową i stopniowo oddaje ją roślinom w okresach bezdeszczowych.",
-      };
+  if (normalized === "UMIARKOWANE" || normalized === "MEDIUM") {
+    return {
+      label: "Umiarkowane zagrożenie suszą",
+      calloutClass: "gov-callout-warning",
+      statusTextClass: "text-gov-warning font-bold",
+    };
   }
+  return {
+    label: "Niskie zagrożenie suszą (dobre uwodnienie)",
+    calloutClass: "gov-callout-success",
+    statusTextClass: "text-gov-success font-bold",
+  };
 }
 
 export default function Step1Assessment({
-  assessment,
+  diagnosis,
   cropName,
+  kcCoefficient,
+  weatherSeries,
 }: Step1AssessmentProps) {
-  const risk = getRiskDetails(assessment.drought_risk_level);
-  const soil = getSoilRetentionDescription(assessment.soil_retention_capacity);
+  const risk = getRiskDetails(diagnosis.drought_risk_level);
 
-  const chartData = [
+  const summaryBarData = [
     {
-      label: "Opady deszczu (30 dni)",
-      value: assessment.precipitation_30d_mm,
-      color: "#0052A5",
+      label: "Bilans wodny (30 dni)",
+      value: diagnosis.kbw_30d_mm,
+      color:
+        diagnosis.kbw_30d_mm < -50
+          ? "#C81E1E"
+          : diagnosis.kbw_30d_mm < 0
+            ? "#B45309"
+            : "#156534",
     },
     {
-      label: "Parowanie z pola (30 dni)",
-      value: assessment.evapotranspiration_30d_mm,
-      color: "#B45309",
+      label: "Bilans wodny (60 dni)",
+      value: diagnosis.kbw_60d_mm,
+      color:
+        diagnosis.kbw_60d_mm < -80
+          ? "#C81E1E"
+          : diagnosis.kbw_60d_mm < 0
+            ? "#B45309"
+            : "#156534",
     },
   ];
 
-  const ndviDiffPercent =
-    assessment.ndvi_10y_median > 0
-      ? Math.round(
-          ((assessment.ndvi_current - assessment.ndvi_10y_median) /
-            assessment.ndvi_10y_median) *
-            100
-        )
-      : 0;
+  const timeSeriesChartData = weatherSeries.map((pt) => ({
+    ...pt,
+    shortDate: pt.date.slice(5), // MM-DD
+    typeLabel: pt.is_forecast ? "Prognoza (7 dni)" : "Historia (30 dni)",
+  }));
 
-  const ndmiDiffPercent =
-    assessment.ndmi_10y_median > 0
-      ? Math.round(
-          ((assessment.ndmi_current - assessment.ndmi_10y_median) /
-            assessment.ndmi_10y_median) *
-            100
-        )
-      : 0;
+  const lastHistoricalPoint = weatherSeries
+    .filter((p) => !p.is_forecast)
+    .slice(-1)[0];
 
-  const missingLitersPerSqM = Math.abs(
-    Math.round(assessment.climatic_water_balance_mm * 10) / 10
-  );
+  const forecastPoints = weatherSeries.filter((p) => p.is_forecast);
+  const forecastPrecipSum =
+    diagnosis.forecast_7d_precip_mm != null
+      ? diagnosis.forecast_7d_precip_mm
+      : Number(
+          forecastPoints
+            .reduce((acc, p) => acc + p.precipitation_mm, 0)
+            .toFixed(1)
+        );
+
+  const forecastKbwEnd =
+    forecastPoints.length > 0
+      ? forecastPoints[forecastPoints.length - 1].kbw_cumulative_mm
+      : diagnosis.kbw_30d_mm;
 
   return (
     <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:break-inside-avoid">
-      {/* Nagłówek Etapu 1 */}
       <div>
         <p className="text-xs font-bold text-gov-blue mb-1">
           Etap 1 z 3 — Diagnoza sytuacji wodnej
@@ -125,84 +114,107 @@ export default function Step1Assessment({
         </h2>
       </div>
 
-      {/* Komunikat statusu ryzyka w stylu gov.pl */}
+      {/* Komunikat statusu ryzyka */}
       <div className={risk.calloutClass}>
         <div className="text-sm font-bold text-gov-navy">
           Poziom ryzyka: <span className={risk.statusTextClass}>{risk.label}</span>
         </div>
         <p className="text-sm text-gov-text mt-1 leading-relaxed">
-          {risk.description}
+          Status bilansu wodnego: <strong>{diagnosis.kbw_status}</strong>{" "}
+          (przyjęty współczynnik zapotrzebowania uprawy Kc:{" "}
+          <span className="font-mono font-semibold">
+            {kcCoefficient.toFixed(2)}
+          </span>
+          ).
         </p>
       </div>
 
-      {/* 1.1 Bilans wodny (Tabela + wykres) */}
+      {/* 1.1 Klimatyczny Bilans Wodny (30 i 60 dni) */}
       <div className="space-y-3">
         <h3 className="text-base font-bold text-gov-navy">
-          1.1. Bilans wodny z ostatnich 30 dni (opady a parowanie)
+          1.1. Klimatyczny Bilans Wodny (30 i 60 dni)
         </h3>
         <p className="text-sm text-gov-secondary leading-relaxed">
-          Porównanie ilości wody, która spadła z deszczem, z ilością wody
-          utraconej przez parowanie z gleby i roślin. Każdy{" "}
-          <strong>1 mm</strong> oznacza <strong>1 litr wody na 1 m² pola</strong>.
+          Różnica między sumą opadów a parowaniem terenowym. Wartość ujemna
+          oznacza deficyt wody na polu — każdy <strong>-1 mm</strong> to brak{" "}
+          <strong>1 litra wody na 1 m²</strong>.
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pt-2">
-          {/* Tabela liczbowa bilansu */}
           <div className="lg:col-span-6">
             <table className="gov-table border border-gov-border tabular-nums">
               <thead>
                 <tr>
-                  <th>Składowa bilansu (ostatnie 30 dni)</th>
-                  <th className="text-right">Wartość</th>
+                  <th>Okres bilansu</th>
+                  <th className="text-right">Bilans (KBW)</th>
                   <th className="text-right">Przeliczenie na 1 m²</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="font-medium">Przychód wody (opady deszczu)</td>
-                  <td className="text-right font-mono font-bold">
-                    {assessment.precipitation_30d_mm.toFixed(1)} mm
+                  <td className="font-medium">Ostatnie 30 dni (historia)</td>
+                  <td
+                    className={`text-right font-mono font-bold ${
+                      diagnosis.kbw_30d_mm < -50
+                        ? "text-gov-danger"
+                        : diagnosis.kbw_30d_mm < 0
+                          ? "text-gov-warning"
+                          : "text-gov-success"
+                    }`}
+                  >
+                    {diagnosis.kbw_30d_mm > 0 ? "+" : ""}
+                    {diagnosis.kbw_30d_mm.toFixed(1)} mm
                   </td>
                   <td className="text-right font-mono text-gov-secondary">
-                    +{assessment.precipitation_30d_mm.toFixed(1)} l/m²
+                    {diagnosis.kbw_30d_mm < 0
+                      ? `brakuje ${Math.abs(diagnosis.kbw_30d_mm).toFixed(1)} l/m²`
+                      : `nadwyżka ${diagnosis.kbw_30d_mm.toFixed(1)} l/m²`}
                   </td>
                 </tr>
                 <tr>
-                  <td className="font-medium">
-                    Utrata wody (parowanie gleby i roślin)
-                  </td>
-                  <td className="text-right font-mono font-bold">
-                    {assessment.evapotranspiration_30d_mm.toFixed(1)} mm
+                  <td className="font-medium">Ostatnie 60 dni (historia)</td>
+                  <td
+                    className={`text-right font-mono font-bold ${
+                      diagnosis.kbw_60d_mm < -80
+                        ? "text-gov-danger"
+                        : diagnosis.kbw_60d_mm < 0
+                          ? "text-gov-warning"
+                          : "text-gov-success"
+                    }`}
+                  >
+                    {diagnosis.kbw_60d_mm > 0 ? "+" : ""}
+                    {diagnosis.kbw_60d_mm.toFixed(1)} mm
                   </td>
                   <td className="text-right font-mono text-gov-secondary">
-                    -{assessment.evapotranspiration_30d_mm.toFixed(1)} l/m²
+                    {diagnosis.kbw_60d_mm < 0
+                      ? `brakuje ${Math.abs(diagnosis.kbw_60d_mm).toFixed(1)} l/m²`
+                      : `nadwyżka ${diagnosis.kbw_60d_mm.toFixed(1)} l/m²`}
                   </td>
                 </tr>
                 <tr className="bg-gov-surface">
                   <td className="font-bold text-gov-navy">
-                    Klimatyczny bilans wodny (saldo)
+                    Prognoza na kolejne 7 dni (Open-Meteo)
                   </td>
-                  <td className="text-right font-mono font-bold text-gov-danger">
-                    {assessment.climatic_water_balance_mm > 0 ? "+" : ""}
-                    {assessment.climatic_water_balance_mm.toFixed(1)} mm
+                  <td className="text-right font-mono font-bold text-gov-blue">
+                    opad: +{forecastPrecipSum.toFixed(1)} mm
                   </td>
-                  <td className="text-right font-mono font-bold text-gov-danger">
-                    brakuje {missingLitersPerSqM} l/m²
+                  <td className="text-right font-mono font-semibold text-gov-navy">
+                    KBW za 7 dni: {forecastKbwEnd > 0 ? "+" : ""}
+                    {forecastKbwEnd.toFixed(1)} mm
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          {/* Wykres słupkowy */}
           <div className="lg:col-span-6 border border-gov-border p-4 bg-white">
             <div className="text-xs font-bold text-gov-secondary mb-2">
-              Porównanie opadów i parowania [mm]
+              Zestawienie 30-dniowego i 60-dniowego bilansu wodnego [mm]
             </div>
             <div className="w-full h-36">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={chartData}
+                  data={summaryBarData}
                   layout="vertical"
                   margin={{ top: 6, right: 64, left: 10, bottom: 6 }}
                 >
@@ -219,13 +231,14 @@ export default function Step1Assessment({
                   <YAxis
                     dataKey="label"
                     type="category"
-                    width={165}
+                    width={155}
                     tick={{ fontSize: 12, fill: "#1B1B1B", fontWeight: 600 }}
                   />
+                  <ReferenceLine x={0} stroke="#0B2240" />
                   <Tooltip
                     formatter={(value: number) => [
-                      `${value} mm (${value} l/m²)`,
-                      "Ilość wody",
+                      `${value} mm`,
+                      "Bilans (KBW)",
                     ]}
                     contentStyle={{
                       borderRadius: "2px",
@@ -234,7 +247,7 @@ export default function Step1Assessment({
                     }}
                   />
                   <Bar dataKey="value" radius={[0, 1, 1, 0]} barSize={22}>
-                    {chartData.map((entry, index) => (
+                    {summaryBarData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                     <LabelList
@@ -255,158 +268,273 @@ export default function Step1Assessment({
         </div>
       </div>
 
-      {/* 1.2 Kondycja upraw i uwodnienie z satelity */}
+      {/* 1.2 Przebieg bilansu w czasie: 30 dni historii + 7 dni prognozy */}
       <div className="space-y-3 pt-4">
-        <h3 className="text-base font-bold text-gov-navy">
-          1.2. Kondycja uprawy i zawartość wody w roślinach (dane satelitarne)
-        </h3>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-base font-bold text-gov-navy">
+            1.2. Przebieg bilansu wodnego dzień po dniu (30 dni historii + 7 dni
+            prognozy)
+          </h3>
+          <div className="flex flex-wrap items-center gap-4 text-xs text-gov-secondary">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 bg-[#0052A5]" />
+              <span>Opady dobowe [mm]</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-4 h-0.5 bg-[#C81E1E]" />
+              <span>Skumulowany bilans KBW [mm]</span>
+            </span>
+          </div>
+        </div>
         <p className="text-sm text-gov-secondary leading-relaxed">
-          Zestawienie aktualnych pomiarów satelitarnych ze średnią wieloletnią
-          (normą z ostatnich 10 lat) dla badanej działki o tej samej porze roku.
+          Czerwona linia pokazuje narastający deficyt wody w ostatnich 30 dniach
+          oraz prognozowany trend na najbliższe 7 dni (po prawej stronie linii
+          przerywanej).
         </p>
 
+        <div className="border border-gov-border p-4 bg-white">
+          <div className="w-full h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={timeSeriesChartData}
+                margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="2 2" stroke="#D2D6DC" />
+                <XAxis
+                  dataKey="shortDate"
+                  tick={{ fontSize: 11, fill: "#4A5568" }}
+                  interval={2}
+                />
+                <YAxis
+                  yAxisId="kbw"
+                  orientation="left"
+                  unit=" mm"
+                  tick={{ fontSize: 11, fill: "#1B1B1B" }}
+                />
+                <YAxis
+                  yAxisId="precip"
+                  orientation="right"
+                  unit=" mm"
+                  domain={[0, 35]}
+                  tick={{ fontSize: 11, fill: "#0052A5" }}
+                />
+                <Tooltip
+                  formatter={(value: number, name: string) => {
+                    if (name === "kbw_cumulative_mm") {
+                      return [`${value} mm`, "Skumulowany bilans KBW"];
+                    }
+                    if (name === "precipitation_mm") {
+                      return [`${value} mm`, "Opad dobowy"];
+                    }
+                    return [`${value} mm`, name];
+                  }}
+                  labelFormatter={(label, payload) => {
+                    const item = payload?.[0]?.payload;
+                    if (!item) return `Data: ${label}`;
+                    return `${item.date} — ${
+                      item.is_forecast ? "PROGNOZA 7-DNIOWA" : "Pomiar historyczny"
+                    } (ET0: ${item.et0_mm} mm)`;
+                  }}
+                  contentStyle={{
+                    borderRadius: "2px",
+                    border: "1px solid #D2D6DC",
+                    fontSize: "12px",
+                  }}
+                />
+                <ReferenceLine
+                  yAxisId="kbw"
+                  y={0}
+                  stroke="#64707D"
+                  strokeDasharray="3 3"
+                />
+                {lastHistoricalPoint && (
+                  <ReferenceLine
+                    yAxisId="kbw"
+                    x={lastHistoricalPoint.date.slice(5)}
+                    stroke="#0B2240"
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                    label={{
+                      value: "Dzisiaj → Prognoza 7d",
+                      position: "insideTopLeft",
+                      fill: "#0B2240",
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  />
+                )}
+                <Bar
+                  yAxisId="precip"
+                  dataKey="precipitation_mm"
+                  fill="#0052A5"
+                  barSize={10}
+                />
+                <Line
+                  yAxisId="kbw"
+                  type="monotone"
+                  dataKey="kbw_cumulative_mm"
+                  stroke="#C81E1E"
+                  strokeWidth={2.5}
+                  dot={false}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* 1.3 Kondycja uprawy z satelity */}
+      <div className="space-y-3 pt-4">
+        <h3 className="text-base font-bold text-gov-navy">
+          1.3. Kondycja i uwodnienie roślin (dane satelitarne Sentinel-2)
+        </h3>
         <table className="gov-table border border-gov-border tabular-nums">
           <thead>
             <tr>
               <th>Badany wskaźnik</th>
-              <th>Co oznacza dla rolnika</th>
+              <th>Znaczenie dla uprawy</th>
               <th className="text-right">Stan obecny</th>
-              <th className="text-right">Norma z 10 lat</th>
-              <th className="text-right">Różnica</th>
+              <th className="text-right">Norma wieloletnia</th>
+              <th className="text-right">Odchylenie</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td className="font-bold">
-                Kondycja i zieloność roślin
+                Kondycja i zieloność łanu
                 <span className="block text-xs font-normal text-gov-secondary">
                   Wskaźnik wegetacji (NDVI)
                 </span>
               </td>
               <td className="text-gov-secondary">
-                Określa gęstość łanu i wigor wzrostu części nadziemnych roślin.
+                Określa gęstość roślin i wigor wzrostu uprawy.
               </td>
               <td className="text-right font-mono font-bold">
-                {assessment.ndvi_current.toFixed(2)}
+                {diagnosis.ndvi_current != null
+                  ? diagnosis.ndvi_current.toFixed(2)
+                  : "Brak danych"}
               </td>
               <td className="text-right font-mono text-gov-secondary">
-                {assessment.ndvi_10y_median.toFixed(2)}
+                {diagnosis.ndvi_historical_median != null
+                  ? diagnosis.ndvi_historical_median.toFixed(2)
+                  : "—"}
               </td>
               <td className="text-right font-mono font-bold">
-                <span
-                  className={
-                    ndviDiffPercent < -10
-                      ? "text-gov-danger"
-                      : ndviDiffPercent < 0
-                        ? "text-gov-warning"
-                        : "text-gov-success"
-                  }
-                >
-                  {ndviDiffPercent > 0
-                    ? `+${ndviDiffPercent}%`
-                    : `${ndviDiffPercent}%`}
-                </span>
+                {diagnosis.ndvi_anomaly_percent != null ? (
+                  <span
+                    className={
+                      diagnosis.ndvi_anomaly_percent < -10
+                        ? "text-gov-danger"
+                        : diagnosis.ndvi_anomaly_percent < 0
+                          ? "text-gov-warning"
+                          : "text-gov-success"
+                    }
+                  >
+                    {diagnosis.ndvi_anomaly_percent > 0
+                      ? `+${diagnosis.ndvi_anomaly_percent.toFixed(1)}%`
+                      : `${diagnosis.ndvi_anomaly_percent.toFixed(1)}%`}
+                  </span>
+                ) : (
+                  "—"
+                )}
               </td>
             </tr>
             <tr>
               <td className="font-bold">
-                Uwodnienie liści i łanu
+                Uwodnienie roślin
                 <span className="block text-xs font-normal text-gov-secondary">
                   Wskaźnik wilgotności (NDMI)
                 </span>
               </td>
               <td className="text-gov-secondary">
-                Pokazuje zawartość wody w tkankach roślin; spadek oznacza stres
-                wodny i więdnięcie.
+                Wskazuje zawartość wody w liściach i początki stresu wodnego.
               </td>
               <td className="text-right font-mono font-bold">
-                {assessment.ndmi_current.toFixed(2)}
+                {diagnosis.ndmi_current != null
+                  ? diagnosis.ndmi_current.toFixed(2)
+                  : "Brak danych"}
               </td>
-              <td className="text-right font-mono text-gov-secondary">
-                {assessment.ndmi_10y_median.toFixed(2)}
-              </td>
-              <td className="text-right font-mono font-bold">
-                <span
-                  className={
-                    ndmiDiffPercent < -20
-                      ? "text-gov-danger"
-                      : ndmiDiffPercent < 0
-                        ? "text-gov-warning"
-                        : "text-gov-success"
-                  }
-                >
-                  {ndmiDiffPercent > 0
-                    ? `+${ndmiDiffPercent}%`
-                    : `${ndmiDiffPercent}%`}
-                </span>
-              </td>
+              <td className="text-right font-mono text-gov-secondary">—</td>
+              <td className="text-right font-mono text-gov-secondary">—</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      {/* 1.3 Warunki glebowe i terenowe */}
+      {/* 1.4 Właściwości gleby i terenu */}
       <div className="space-y-3 pt-4">
         <h3 className="text-base font-bold text-gov-navy">
-          1.3. Właściwości gleby, ukształtowanie terenu i sieć rowów
+          1.4. Gleba, nachylenie terenu i sieć melioracyjna
         </h3>
-
         <table className="gov-table border border-gov-border tabular-nums">
           <thead>
             <tr>
-              <th className="w-1/3">Czynnik środowiskowy</th>
-              <th className="w-1/4">Wartość na działce</th>
-              <th>Wpływ na gospodarkę wodną pola</th>
+              <th className="w-1/3">Parametr działki</th>
+              <th className="w-1/4">Wartość</th>
+              <th>Opis agronomiczny</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td className="font-bold">Zdolność gleby do zatrzymywania wody</td>
-              <td className="font-semibold">{soil.label}</td>
-              <td className="text-gov-secondary">{soil.detail}</td>
+              <td className="font-bold">Kategoria i uziarnienie gleby</td>
+              <td className="font-semibold">
+                {diagnosis.soil_category} ({diagnosis.soil_texture})
+              </td>
+              <td className="text-gov-secondary">
+                Polowa Pojemność Wodna (AWC) do 30 cm:{" "}
+                <strong className="font-mono text-gov-text">
+                  {diagnosis.awc_mm.toFixed(1)} mm
+                </strong>
+                .
+              </td>
             </tr>
             <tr>
-              <td className="font-bold">Nachylenie terenu (spadek pola)</td>
-              <td className="font-mono font-bold">{assessment.slope_percent}%</td>
+              <td className="font-bold">Średni spadek terenu</td>
+              <td className="font-mono font-bold">
+                {diagnosis.slope_percent.toFixed(1)}%
+              </td>
               <td className="text-gov-secondary">
-                {assessment.slope_percent >= 3
-                  ? "Podwyższone ryzyko spływu powierzchniowego wody po stoku podczas ulewnych opadów."
-                  : "Niewielki spadek terenu sprzyja wsiąkaniu wody opadowej na polu."}
+                {diagnosis.slope_percent >= 3
+                  ? "Podwyższone ryzyko spływu powierzchniowego wody po stoku podczas ulew."
+                  : "Niewielki spadek terenu sprzyja wsiąkaniu wody opadowej."}
               </td>
             </tr>
             <tr>
               <td className="font-bold">
-                Rowy i cieki wodne w sąsiedztwie (do 300 m)
+                Odległość do najbliższego rowu / cieku
               </td>
               <td className="font-mono font-bold">
-                {assessment.nearby_waterways_count}{" "}
-                {assessment.nearby_waterways_count === 1 ? "obiekt" : "obiekty"}
+                {diagnosis.distance_to_ditch_m != null
+                  ? `${Math.round(diagnosis.distance_to_ditch_m)} m`
+                  : "Brak w buforze 500 m"}
               </td>
               <td className="text-gov-secondary">
-                {assessment.nearby_waterways_count > 0
-                  ? "Obecność rowów w sąsiedztwie pozwala na spowolnienie odpływu wody (np. przez zastosowanie zastawki)."
-                  : "Brak rowów melioracyjnych w bezpośrednim sąsiedztwie działki."}
+                {diagnosis.distance_to_ditch_m != null
+                  ? "Bliskość rowu melioracyjnego stwarza możliwość spowolnienia odpływu wody."
+                  : "W bezpośrednim sąsiedztwie działki nie wykryto rowów melioracyjnych."}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      {/* 1.4 Zidentyfikowane przyczyny niedoboru wody */}
-      <div className="space-y-3 pt-4">
-        <h3 className="text-base font-bold text-gov-navy">
-          1.4. Główne przyczyny niedoboru wody na działce
-        </h3>
-        <div className="gov-callout-warning">
-          <ol className="list-decimal list-inside space-y-2 text-sm text-gov-text">
-            {assessment.identified_causes.map((cause, idx) => (
-              <li key={idx} className="leading-relaxed">
-                <span className="font-medium">{cause}</span>
-              </li>
-            ))}
-          </ol>
+      {/* 1.5 Główne przyczyny niedoboru wody */}
+      {diagnosis.primary_causes.length > 0 && (
+        <div className="space-y-3 pt-4">
+          <h3 className="text-base font-bold text-gov-navy">
+            1.5. Główne przyczyny niedoboru wody na działce
+          </h3>
+          <div className="gov-callout-warning">
+            <ol className="list-decimal list-inside space-y-2 text-sm text-gov-text">
+              {diagnosis.primary_causes.map((cause, idx) => (
+                <li key={idx} className="leading-relaxed">
+                  <span className="font-medium">{cause}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }

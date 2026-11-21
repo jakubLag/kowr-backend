@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useRef, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -8,22 +8,17 @@ import {
   CropType,
   ParcelSearchResponse,
 } from "@/types/analysis";
-import {
-  CROP_OPTIONS,
-  DEFAULT_SAMPLE_TERYT,
-  getMockAnalysis,
-} from "@/lib/mockData";
+import { CROP_OPTIONS } from "@/lib/crops";
 import {
   analyzeParcelWater,
   ApiError,
   searchParcelByTeryt,
 } from "@/lib/api";
+import { getStoredParcel, saveStoredParcel } from "@/lib/parcelStore";
 import {
-  getForceMockPreference,
-  getStoredParcel,
-  saveStoredParcel,
-  setForceMockPreference,
-} from "@/lib/parcelStore";
+  calculateRetentionSimulation,
+  getOrBuildDailyWeatherSeries,
+} from "@/lib/retentionSimulator";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 import LoadingAnalysis from "@/components/LoadingAnalysis";
@@ -34,7 +29,7 @@ import TransparencyBox from "@/components/report/TransparencyBox";
 
 function ReportPageContent() {
   const searchParams = useSearchParams();
-  const terytParam = searchParams.get("teryt") || DEFAULT_SAMPLE_TERYT;
+  const terytParam = searchParams.get("teryt");
   const cropParam = (searchParams.get("crop") as CropType) || "kukurydza";
   const dateParam = searchParams.get("date") || "2026-11-21";
 
@@ -43,26 +38,25 @@ function ReportPageContent() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] =
     useState<AnalysisResponse | null>(null);
-  const [forceMock, setForceMock] = useState<boolean>(false);
-  const [dataSourceMode, setDataSourceMode] = useState<"api" | "mock" | null>(
-    null
+  const [selectedRetentionIds, setSelectedRetentionIds] = useState<string[]>(
+    []
   );
 
-  const skipRef = useRef<boolean>(false);
-
   useEffect(() => {
-    const pref = getForceMockPreference();
-    setForceMock(pref);
-    skipRef.current = false;
+    if (!terytParam) {
+      setIsAnalyzing(false);
+      setAnalyzeError("Brak identyfikatora działki TERYT w parametrach adresu.");
+      return;
+    }
+
     setIsAnalyzing(true);
     setAnalyzeError(null);
 
-    async function loadParcelAndAnalyze() {
-      let currentParcel = getStoredParcel(terytParam);
+    async function loadParcelAndAnalyze(teryt: string) {
+      let currentParcel = getStoredParcel(teryt);
       if (!currentParcel) {
         try {
-          const pRes = await searchParcelByTeryt(terytParam, pref);
-          currentParcel = pRes.data;
+          currentParcel = await searchParcelByTeryt(teryt);
           saveStoredParcel(currentParcel);
         } catch {
           currentParcel = null;
@@ -71,57 +65,37 @@ function ReportPageContent() {
       setParcel(currentParcel);
 
       try {
-        const res = await analyzeParcelWater(
-          {
-            teryt: terytParam,
-            crop_type: cropParam,
-            analysis_date: dateParam,
-          },
-          currentParcel,
-          pref,
-          11000
-        );
-        if (!skipRef.current) {
-          setAnalysisResult(res.data);
-          setDataSourceMode(res.source);
-          setIsAnalyzing(false);
+        const res = await analyzeParcelWater({
+          teryt,
+          crop: cropParam,
+          target_date: dateParam,
+        });
+        setAnalysisResult(res);
+        setSelectedRetentionIds(res.step2_retention.map((r) => r.id));
+        if (res.parcel_info) {
+          setParcel(res.parcel_info);
+          saveStoredParcel(res.parcel_info);
         }
       } catch (err) {
-        if (!skipRef.current) {
-          if (err instanceof ApiError) {
-            setAnalyzeError(err.message);
-          } else {
-            setAnalyzeError(
-              "Nie udało się wygenerować raportu dla wskazanej działki."
-            );
-          }
-          setIsAnalyzing(false);
+        if (err instanceof ApiError) {
+          setAnalyzeError(err.message);
+        } else {
+          setAnalyzeError(
+            "Nie udało się wygenerować raportu dla wskazanej działki."
+          );
         }
+      } finally {
+        setIsAnalyzing(false);
       }
     }
 
-    loadParcelAndAnalyze();
+    loadParcelAndAnalyze(terytParam);
   }, [terytParam, cropParam, dateParam]);
 
-  const handleToggleForceMock = () => {
-    const nextVal = !forceMock;
-    setForceMock(nextVal);
-    setForceMockPreference(nextVal);
-  };
-
-  const handleSkipDemoLoading = () => {
-    skipRef.current = true;
-    const instantMock = getMockAnalysis(
-      {
-        teryt: terytParam,
-        crop_type: cropParam,
-        analysis_date: dateParam,
-      },
-      parcel
+  const handleToggleRetentionAction = (id: string) => {
+    setSelectedRetentionIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
-    setAnalysisResult(instantMock);
-    setDataSourceMode("mock");
-    setIsAnalyzing(false);
   };
 
   const handlePrintPdf = () => {
@@ -129,7 +103,45 @@ function ReportPageContent() {
   };
 
   const cropLabel =
-    CROP_OPTIONS.find((c) => c.id === cropParam)?.label || "Kukurydza";
+    CROP_OPTIONS.find((c) => c.id === cropParam)?.name_pl || cropParam;
+
+  const weatherSeries = useMemo(() => {
+    if (!analysisResult) return [];
+    return getOrBuildDailyWeatherSeries(
+      analysisResult.step1_diagnosis,
+      dateParam || analysisResult.metadata.analysis_date,
+      analysisResult.kc_coefficient
+    );
+  }, [analysisResult, dateParam]);
+
+  const forecastDays = useMemo(
+    () => weatherSeries.filter((d) => d.is_forecast),
+    [weatherSeries]
+  );
+
+  const retentionSimulation = useMemo(() => {
+    if (!analysisResult) {
+      return {
+        selectedCount: 0,
+        totalWaterGainMm: 0,
+        totalWaterGainM3Parcel: 0,
+        newAwcMm: 0,
+        totalBufferDays: 0,
+        irrigationDoseBeforeMm: 0,
+        irrigationDoseAfterMm: 0,
+        savedIrrigationM3Parcel: 0,
+        totalSubsidyPlnPerHa: 0,
+        totalSubsidyPlnParcel: 0,
+      };
+    }
+    return calculateRetentionSimulation(
+      analysisResult.step2_retention,
+      selectedRetentionIds,
+      analysisResult.step1_diagnosis.awc_mm,
+      analysisResult.step3_irrigation.dose_mm,
+      analysisResult.parcel_info.area_ha
+    );
+  }, [analysisResult, selectedRetentionIds]);
 
   return (
     <div className="min-h-screen flex flex-col bg-white text-gov-text">
@@ -138,20 +150,16 @@ function ReportPageContent() {
         teryt={terytParam}
         crop={cropParam}
         date={dateParam}
-        dataSourceMode={dataSourceMode}
-        forceMock={forceMock}
-        onToggleForceMock={handleToggleForceMock}
       />
 
       <main className="flex-1 gov-container pt-8 print:max-w-none print:p-0">
-        {/* Stan oczekiwania (10-25 s) */}
-        {isAnalyzing && (
+        {/* Stan oczekiwania */}
+        {isAnalyzing && terytParam && (
           <div className="print:hidden">
             <LoadingAnalysis
               teryt={terytParam}
               cropLabel={cropLabel}
               analysisDate={dateParam}
-              onSkipDemo={handleSkipDemoLoading}
             />
           </div>
         )}
@@ -166,12 +174,18 @@ function ReportPageContent() {
               <p className="text-sm text-gov-text mt-1">{analyzeError}</p>
             </div>
             <div>
-              <Link
-                href={`/parametry?teryt=${encodeURIComponent(terytParam)}&crop=${encodeURIComponent(cropParam)}&date=${encodeURIComponent(dateParam)}`}
-                className="gov-btn-secondary"
-              >
-                Wróć do wyboru parametrów
-              </Link>
+              {terytParam ? (
+                <Link
+                  href={`/parametry?teryt=${encodeURIComponent(terytParam)}&crop=${encodeURIComponent(cropParam)}&date=${encodeURIComponent(dateParam)}`}
+                  className="gov-btn-secondary"
+                >
+                  Wróć do wyboru parametrów
+                </Link>
+              ) : (
+                <Link href="/" className="gov-btn-primary">
+                  Wróć do wyszukiwania działki
+                </Link>
+              )}
             </div>
           </div>
         )}
@@ -182,18 +196,22 @@ function ReportPageContent() {
             {/* Pasek akcji u góry (ukrywany przy druku) */}
             <div className="flex flex-wrap items-center justify-between gap-3 pb-5 border-b border-gov-border print:hidden">
               <div className="flex flex-wrap items-center gap-2.5">
-                <Link
-                  href={`/parametry?teryt=${encodeURIComponent(terytParam)}&crop=${encodeURIComponent(cropParam)}&date=${encodeURIComponent(dateParam)}`}
-                  className="gov-btn-secondary text-xs py-2 px-3.5"
-                >
-                  Zmień uprawę lub datę
-                </Link>
-                <Link
-                  href={`/?teryt=${encodeURIComponent(terytParam)}`}
-                  className="gov-btn-neutral py-2 px-3.5"
-                >
-                  Inna działka
-                </Link>
+                {terytParam && (
+                  <>
+                    <Link
+                      href={`/parametry?teryt=${encodeURIComponent(terytParam)}&crop=${encodeURIComponent(cropParam)}&date=${encodeURIComponent(dateParam)}`}
+                      className="gov-btn-secondary text-xs py-2 px-3.5"
+                    >
+                      Zmień uprawę lub datę
+                    </Link>
+                    <Link
+                      href={`/?teryt=${encodeURIComponent(terytParam)}`}
+                      className="gov-btn-neutral py-2 px-3.5"
+                    >
+                      Inna działka
+                    </Link>
+                  </>
+                )}
               </div>
 
               <button
@@ -205,7 +223,7 @@ function ReportPageContent() {
               </button>
             </div>
 
-            {/* Nagłówek urzędowy raportu (widoczny na ekranie i na wydruku A4) */}
+            {/* Nagłówek urzędowy raportu */}
             <header className="space-y-5">
               <div className="hidden print:flex items-center justify-between pb-3 border-b-2 border-gov-navy text-xs">
                 <div>
@@ -224,9 +242,7 @@ function ReportPageContent() {
                 </p>
                 <h1 className="text-2xl sm:text-3xl font-bold text-gov-navy">
                   Ocena sytuacji wodnej i zalecenia dla działki{" "}
-                  <span className="font-mono">
-                    {analysisResult.metadata.parcel_id}
-                  </span>
+                  <span className="font-mono">{analysisResult.teryt}</span>
                 </h1>
               </div>
 
@@ -244,19 +260,17 @@ function ReportPageContent() {
                 <tbody>
                   <tr>
                     <td className="font-mono font-bold">
-                      {analysisResult.metadata.parcel_id}
+                      {analysisResult.teryt}
                     </td>
                     <td>
-                      {parcel
-                        ? `gm. ${parcel.commune}, obręb ${parcel.precinct}`
+                      {analysisResult.parcel_info?.commune || parcel?.commune
+                        ? `gm. ${analysisResult.parcel_info?.commune || parcel?.commune}, obręb ${analysisResult.parcel_info?.precinct || parcel?.precinct || "—"}`
                         : "Zgodnie z rejestrem ewidencji gruntów"}
                     </td>
                     <td className="font-mono font-bold">
-                      {analysisResult.metadata.area_ha} ha
+                      {analysisResult.parcel_info.area_ha} ha
                     </td>
-                    <td className="font-bold">
-                      {analysisResult.metadata.crop}
-                    </td>
+                    <td className="font-bold">{cropLabel}</td>
                     <td className="font-mono">
                       {analysisResult.metadata.analysis_date}
                     </td>
@@ -270,26 +284,54 @@ function ReportPageContent() {
                   Podsumowanie sytuacji wodnej na Twoim polu
                 </div>
                 <p className="text-sm sm:text-base text-gov-text mt-1 leading-relaxed">
-                  {analysisResult.farmer_friendly_summary}
+                  Dla działki{" "}
+                  <strong className="font-mono">{analysisResult.teryt}</strong>{" "}
+                  ({analysisResult.parcel_info.area_ha} ha, uprawa:{" "}
+                  <strong>{cropLabel}</strong>) stwierdzono{" "}
+                  <strong>
+                    {analysisResult.step1_diagnosis.drought_risk_level.toLowerCase()}{" "}
+                    ryzyko suszy
+                  </strong>{" "}
+                  ({analysisResult.step1_diagnosis.kbw_status}, bilans 30-dniowy:{" "}
+                  <strong className="font-mono">
+                    {analysisResult.step1_diagnosis.kbw_30d_mm} mm
+                  </strong>
+                  ). Wdrożenie zalecanych praktyk retencyjnych w Etapie 2
+                  pozwoli zatrzymać na polu dodatkowo{" "}
+                  <strong className="font-mono">
+                    +{retentionSimulation.totalWaterGainM3Parcel} m³ wody
+                  </strong>{" "}
+                  oraz uzyskać ok.{" "}
+                  <strong className="font-mono">
+                    {retentionSimulation.totalSubsidyPlnParcel} zł/rok
+                  </strong>{" "}
+                  wsparcia z Ekoschematów ARiMR.
                 </p>
               </div>
             </header>
 
-            {/* Obowiązkowa kolejność wyświetlania wyników w raporcie wg specyfikacji KOWR:
-                Etap 1 -> Etap 2 (Retencja jako priorytet) -> Etap 3 (Nawadnianie) -> Źródła i ograniczenia */}
             <Step1Assessment
-              assessment={analysisResult.step_1_water_assessment}
-              cropName={analysisResult.metadata.crop}
+              diagnosis={analysisResult.step1_diagnosis}
+              cropName={cropLabel}
+              kcCoefficient={analysisResult.kc_coefficient}
+              weatherSeries={weatherSeries}
             />
 
             <Step2Retention
-              recommendations={analysisResult.step_2_retention_recommendations}
+              recommendations={analysisResult.step2_retention}
+              selectedIds={selectedRetentionIds}
+              onToggleAction={handleToggleRetentionAction}
+              simulation={retentionSimulation}
+              baseAwcMm={analysisResult.step1_diagnosis.awc_mm}
+              areaHa={analysisResult.parcel_info.area_ha}
             />
 
             <Step3Irrigation
-              irrigation={analysisResult.step_3_irrigation_recommendations}
-              areaHa={analysisResult.metadata.area_ha}
-              cropName={analysisResult.metadata.crop}
+              irrigation={analysisResult.step3_irrigation}
+              areaHa={analysisResult.parcel_info.area_ha}
+              cropName={cropLabel}
+              simulation={retentionSimulation}
+              forecastDays={forecastDays}
             />
 
             <TransparencyBox metadata={analysisResult.metadata} />

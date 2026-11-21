@@ -1,99 +1,142 @@
 export type CropType =
+  | "kukurydza"
   | "pszenica_ozima"
   | "pszenica_jara"
-  | "kukurydza"
   | "rzepak"
-  | "ziemniak"
   | "burak_cukrowy"
+  | "ziemniak"
   | "jeczmien"
-  | "laki"
-  | "warzywa";
+  | "zyto"
+  | "soja"
+  | "laka";
 
-export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
-
-export interface GeoJSONPolygonGeometry {
-  type: "Polygon" | "MultiPolygon";
-  coordinates: number[][][] | number[][][][];
+export interface CropInfo {
+  id: CropType | string;
+  name_pl: string;
+  kc_initial: number;
+  kc_mid: number;
+  kc_end: number;
+  root_depth_m: number;
+  drought_sensitivity: string;
 }
 
-export interface ParcelFeature {
-  type: "Feature";
-  properties: {
-    teryt: string;
-    [key: string]: unknown;
-  };
-  geometry: GeoJSONPolygonGeometry;
+export interface PointCoordinates {
+  lat: number;
+  lon: number;
+}
+
+export interface ParcelGeometry {
+  type: "Polygon" | "MultiPolygon" | string;
+  coordinates: number[][][] | number[][][][];
 }
 
 export interface ParcelSearchResponse {
   teryt: string;
-  voivodeship: string;
-  county: string;
-  commune: string;
-  precinct: string;
+  voivodeship?: string | null;
+  county?: string | null;
+  commune?: string | null;
+  precinct?: string | null;
+  parcel_number?: string | null;
   area_ha: number;
-  center: [number, number];
-  geometry: ParcelFeature;
+  center: PointCoordinates;
+  geometry: ParcelGeometry;
+  wkt_2180?: string | null;
 }
 
 export interface AnalyzeRequest {
   teryt: string;
-  crop_type: CropType;
-  analysis_date: string;
+  crop: CropType | string;
+  target_date?: string | null;
 }
 
-export interface DataSource {
-  name: string;
+export interface DailyWeatherPoint {
   date: string;
-  details: string;
+  precipitation_mm: number;
+  et0_mm: number;
+  kbw_daily_mm: number;
+  kbw_cumulative_mm: number;
+  is_forecast: boolean;
+  temp_max_c?: number | null;
+  wind_max_ms?: number | null;
 }
 
-export interface AnalysisMetadata {
-  parcel_id: string;
-  area_ha: number;
-  crop: string;
-  analysis_date: string;
-  processing_time_sec: number;
-  data_sources: DataSource[];
-  limitations: string[];
-}
-
-export interface Step1WaterAssessment {
-  drought_risk_level: RiskLevel;
-  climatic_water_balance_mm: number;
-  precipitation_30d_mm: number;
-  evapotranspiration_30d_mm: number;
-  ndvi_current: number;
-  ndvi_10y_median: number;
-  ndmi_current: number;
-  ndmi_10y_median: number;
-  soil_retention_capacity: RiskLevel;
+export interface Diagnosis {
+  kbw_30d_mm: number;
+  kbw_60d_mm: number;
+  kbw_status: string;
+  drought_risk_level: "WYSOKIE" | "UMIARKOWANE" | "NISKIE" | string;
+  awc_mm: number;
+  soil_category: string;
+  soil_texture: string;
+  ndvi_current?: number | null;
+  ndvi_historical_median?: number | null;
+  ndvi_anomaly_percent?: number | null;
+  ndmi_current?: number | null;
   slope_percent: number;
-  nearby_waterways_count: number;
-  identified_causes: string[];
+  distance_to_ditch_m?: number | null;
+  primary_causes: string[];
+  precipitation_30d_mm?: number | null;
+  et0_30d_mm?: number | null;
+  forecast_7d_precip_mm?: number | null;
+  forecast_7d_et0_mm?: number | null;
+  daily_weather_series?: DailyWeatherPoint[] | null;
 }
 
-export interface RetentionRecommendation {
-  category: string;
+export interface RetentionAction {
+  id: string;
   title: string;
-  justification: string;
+  badge: string;
+  why: string;
+  action: string;
+  priority: number;
+  category: string;
+  water_gain_mm?: number | null;
+  drought_buffer_days?: number | null;
+  ecoscheme_name?: string | null;
+  ecoscheme_code?: string | null;
+  ecoscheme_pln_per_ha?: number | null;
 }
 
-export interface Step3IrrigationRecommendations {
-  is_recommended: boolean;
-  recommended_dose_mm: number;
-  timing: string;
+export interface IrrigationRecommendation {
+  needed: boolean;
+  status: string;
+  dose_mm: number;
+  dose_m3_per_ha: number;
+  recommended_timing: string;
+  recommended_technique: string;
   justification: string;
+  forecast_7d_precip_mm?: number | null;
+  weather_window_status?: string | null;
+}
+
+export interface ReportMetadata {
+  sources: string[];
+  analysis_date: string;
+  sentinel_scene_date?: string | null;
+  cloud_cover_percent?: number | null;
+  limitations: string[];
+  execution_time_ms: number;
 }
 
 export interface AnalysisResponse {
-  metadata: AnalysisMetadata;
-  step_1_water_assessment: Step1WaterAssessment;
-  step_2_retention_recommendations: RetentionRecommendation[];
-  step_3_irrigation_recommendations: Step3IrrigationRecommendations;
-  farmer_friendly_summary: string;
+  teryt: string;
+  crop: string;
+  kc_coefficient: number;
+  parcel_info: ParcelSearchResponse;
+  step1_diagnosis: Diagnosis;
+  step2_retention: RetentionAction[];
+  step3_irrigation: IrrigationRecommendation;
+  metadata: ReportMetadata;
 }
 
 export interface ApiErrorResponse {
   detail: string;
+}
+
+export interface LocationSuggestion {
+  id: string;
+  name: string;
+  details: string;
+  lat: number;
+  lon: number;
 }
