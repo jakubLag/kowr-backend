@@ -1,6 +1,11 @@
 from fastapi import APIRouter, Query, HTTPException
 from app.models.schemas import ParcelSearchResponse
-from app.services.gis.uldk import fetch_parcel_from_uldk
+from app.services.gis.uldk import (
+    fetch_parcel_from_uldk,
+    fetch_parcel_by_point_from_uldk,
+    ParcelNotFoundError,
+    UldkServiceError,
+)
 
 router = APIRouter(prefix="/parcel", tags=["Działka"])
 
@@ -20,3 +25,25 @@ async def search_parcel(
         return parcel_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Błąd przetwarzania działki TERYT: {str(e)}")
+
+
+@router.get("/by-point", response_model=ParcelSearchResponse)
+async def search_parcel_by_point(
+    lat: float = Query(..., ge=49.0, le=55.0, description="Szerokość geograficzna WGS84"),
+    lon: float = Query(..., ge=14.0, le=24.5, description="Długość geograficzna WGS84"),
+):
+    """
+    Wyszukuje działkę ewidencyjną na podstawie współrzędnych kliknięcia na mapie (WGS84).
+    """
+    try:
+        return await fetch_parcel_by_point_from_uldk(lat, lon)
+    except ParcelNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="W klikniętym punkcie nie odnaleziono działki ewidencyjnej. Kliknij bezpośrednio wewnątrz granic pola.",
+        )
+    except UldkServiceError:
+        raise HTTPException(
+            status_code=502,
+            detail="Usługa ewidencji gruntów GUGiK (ULDK) jest chwilowo niedostępna. Spróbuj ponownie.",
+        )
