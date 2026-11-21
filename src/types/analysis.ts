@@ -140,3 +140,10 @@ export interface LocationSuggestion {
   lat: number;
   lon: number;
 }
+
+export interface LandUseCheckResult {
+  status: "water" | "forest" | "agricultural";
+  label: string;
+  featureName?: string | null;
+  canAnalyze: boolean;
+}

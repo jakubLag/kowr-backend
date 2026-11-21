@@ -1,7 +1,12 @@
 "use client";
 
 import React from "react";
-import { DailyWeatherPoint, Diagnosis } from "@/types/analysis";
+import dynamic from "next/dynamic";
+import {
+  DailyWeatherPoint,
+  Diagnosis,
+  ParcelSearchResponse,
+} from "@/types/analysis";
 import {
   BarChart,
   Bar,
@@ -14,11 +19,25 @@ import {
   ResponsiveContainer,
   Cell,
   LabelList,
+  ReferenceArea,
   ReferenceLine,
 } from "recharts";
 
+const ReportHydroMap = dynamic(
+  () => import("@/components/report/ReportHydroMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-72 w-full border border-gov-border bg-gov-surface flex items-center justify-center text-xs text-gov-secondary">
+        Wczytywanie szkicu hydrologicznego działki...
+      </div>
+    ),
+  }
+);
+
 interface Step1AssessmentProps {
   diagnosis: Diagnosis;
+  parcelInfo?: ParcelSearchResponse | null;
   cropName: string;
   kcCoefficient: number;
   weatherSeries: DailyWeatherPoint[];
@@ -49,6 +68,7 @@ function getRiskDetails(level: string) {
 
 export default function Step1Assessment({
   diagnosis,
+  parcelInfo,
   cropName,
   kcCoefficient,
   weatherSeries,
@@ -89,6 +109,8 @@ export default function Step1Assessment({
     .slice(-1)[0];
 
   const forecastPoints = weatherSeries.filter((p) => p.is_forecast);
+  const firstForecastPoint = forecastPoints[0];
+  const lastForecastPoint = forecastPoints[forecastPoints.length - 1];
   const forecastPrecipSum =
     diagnosis.forecast_7d_precip_mm != null
       ? diagnosis.forecast_7d_precip_mm
@@ -151,8 +173,23 @@ export default function Step1Assessment({
                 </tr>
               </thead>
               <tbody>
+                {diagnosis.precipitation_30d_mm != null &&
+                  diagnosis.et0_30d_mm != null && (
+                    <tr>
+                      <td className="font-medium">
+                        Opady i parowanie ET0 (30 dni)
+                      </td>
+                      <td className="text-right font-mono text-xs">
+                        opad: <strong>{diagnosis.precipitation_30d_mm.toFixed(1)} mm</strong>
+                      </td>
+                      <td className="text-right font-mono text-xs text-gov-secondary">
+                        ET0: {diagnosis.et0_30d_mm.toFixed(1)} mm (ETc:{" "}
+                        {(diagnosis.et0_30d_mm * kcCoefficient).toFixed(1)} mm)
+                      </td>
+                    </tr>
+                  )}
                 <tr>
-                  <td className="font-medium">Ostatnie 30 dni (historia)</td>
+                  <td className="font-medium">Ostatnie 30 dni (bilans KBW)</td>
                   <td
                     className={`text-right font-mono font-bold ${
                       diagnosis.kbw_30d_mm < -50
@@ -315,7 +352,11 @@ export default function Step1Assessment({
                   yAxisId="precip"
                   orientation="right"
                   unit=" mm"
-                  domain={[0, 35]}
+                  domain={[
+                    0,
+                    (dataMax: number) =>
+                      Math.max(20, Math.ceil((dataMax || 0) * 1.2)),
+                  ]}
                   tick={{ fontSize: 11, fill: "#0052A5" }}
                 />
                 <Tooltip
@@ -347,6 +388,15 @@ export default function Step1Assessment({
                   stroke="#64707D"
                   strokeDasharray="3 3"
                 />
+                {firstForecastPoint && lastForecastPoint && (
+                  <ReferenceArea
+                    yAxisId="kbw"
+                    x1={firstForecastPoint.date.slice(5)}
+                    x2={lastForecastPoint.date.slice(5)}
+                    fill="#0052A5"
+                    fillOpacity={0.07}
+                  />
+                )}
                 {lastHistoricalPoint && (
                   <ReferenceLine
                     yAxisId="kbw"
@@ -355,8 +405,8 @@ export default function Step1Assessment({
                     strokeWidth={2}
                     strokeDasharray="4 3"
                     label={{
-                      value: "Dzisiaj → Prognoza 7d",
-                      position: "insideTopLeft",
+                      value: "Prognoza 7 dni →",
+                      position: "insideTopRight",
                       fill: "#0B2240",
                       fontSize: 11,
                       fontWeight: 700,
@@ -366,9 +416,15 @@ export default function Step1Assessment({
                 <Bar
                   yAxisId="precip"
                   dataKey="precipitation_mm"
-                  fill="#0052A5"
                   barSize={10}
-                />
+                >
+                  {timeSeriesChartData.map((entry, idx) => (
+                    <Cell
+                      key={`pcell-${idx}`}
+                      fill={entry.is_forecast ? "#0284C7" : "#0052A5"}
+                    />
+                  ))}
+                </Bar>
                 <Line
                   yAxisId="kbw"
                   type="monotone"
@@ -516,6 +572,12 @@ export default function Step1Assessment({
             </tr>
           </tbody>
         </table>
+
+        {parcelInfo && (
+          <div className="pt-2 print:hidden">
+            <ReportHydroMap parcel={parcelInfo} diagnosis={diagnosis} />
+          </div>
+        )}
       </div>
 
       {/* 1.5 Główne przyczyny niedoboru wody */}

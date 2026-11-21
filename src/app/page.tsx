@@ -3,14 +3,24 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LocationSuggestion, ParcelSearchResponse } from "@/types/analysis";
+import {
+  LandUseCheckResult,
+  LocationSuggestion,
+  ParcelSearchResponse,
+} from "@/types/analysis";
 import {
   ApiError,
+  checkPointLandUse,
   searchLocations,
   searchParcelByPoint,
   searchParcelByTeryt,
 } from "@/lib/api";
-import { getStoredParcel, saveStoredParcel } from "@/lib/parcelStore";
+import {
+  getRecentParcels,
+  getStoredParcel,
+  removeRecentParcel,
+  saveStoredParcel,
+} from "@/lib/parcelStore";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 import type { MapFlyTarget } from "@/components/ParcelMap";
@@ -60,8 +70,15 @@ function Step1ParcelSearchContent() {
   // Wynik i błędy działki
   const [parcelError, setParcelError] = useState<string | null>(null);
   const [parcel, setParcel] = useState<ParcelSearchResponse | null>(null);
+  const [landUseCheck, setLandUseCheck] = useState<LandUseCheckResult | null>(
+    null
+  );
+  const [recentParcels, setRecentParcels] = useState<ParcelSearchResponse[]>(
+    []
+  );
 
   useEffect(() => {
+    setRecentParcels(getRecentParcels());
     const cached = getStoredParcel(initialTerytParam);
     if (cached) {
       setParcel(cached);
@@ -194,13 +211,19 @@ function Step1ParcelSearchContent() {
     }
 
     setParcelError(null);
+    setLandUseCheck(null);
     setIsSearchingParcel(true);
 
     try {
       const data = await searchParcelByTeryt(cleaned);
+      const lu = await checkPointLandUse(data.center.lat, data.center.lon);
+      setLandUseCheck(lu);
       setShouldFitBounds(true);
       setParcel(data);
-      saveStoredParcel(data);
+      if (lu.canAnalyze) {
+        saveStoredParcel(data);
+        setRecentParcels(getRecentParcels());
+      }
     } catch (err) {
       setParcel(null);
       if (err instanceof ApiError) {
@@ -222,15 +245,23 @@ function Step1ParcelSearchContent() {
 
   const handleMapClickParcel = useCallback(async (lat: number, lon: number) => {
     setParcelError(null);
+    setLandUseCheck(null);
     setIsPickingParcel(true);
     setClickedPoint([lat, lon]);
 
     try {
-      const data = await searchParcelByPoint(lat, lon);
+      const [data, lu] = await Promise.all([
+        searchParcelByPoint(lat, lon),
+        checkPointLandUse(lat, lon),
+      ]);
+      setLandUseCheck(lu);
       setShouldFitBounds(false);
       setParcel(data);
       setTerytInput(data.teryt);
-      saveStoredParcel(data);
+      if (lu.canAnalyze) {
+        saveStoredParcel(data);
+        setRecentParcels(getRecentParcels());
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         setParcelError(err.message);
@@ -248,6 +279,21 @@ function Step1ParcelSearchContent() {
   const handleProceedToStep2 = () => {
     if (!parcel) return;
     router.push(`/parametry?teryt=${encodeURIComponent(parcel.teryt)}`);
+  };
+
+  const handleSelectRecentParcel = (item: ParcelSearchResponse) => {
+    setParcelError(null);
+    setLandUseCheck(null);
+    setShouldFitBounds(true);
+    setParcel(item);
+    setTerytInput(item.teryt);
+    saveStoredParcel(item);
+    setRecentParcels(getRecentParcels());
+  };
+
+  const handleRemoveRecentParcel = (teryt: string) => {
+    removeRecentParcel(teryt);
+    setRecentParcels(getRecentParcels());
   };
 
   return (
@@ -491,15 +537,47 @@ function Step1ParcelSearchContent() {
             {/* Potwierdzenie wybranej działki (wspólne dla kliknięcia na mapie i TERYT) */}
             {parcel && (
               <div className="pt-4 border-t border-gov-border space-y-5">
-                <div className="gov-callout-success">
-                  <div className="text-sm font-bold text-gov-navy">
-                    Wybrano działkę ewidencyjną
+                {landUseCheck?.status === "water" ? (
+                  <div role="alert" className="gov-callout-danger">
+                    <div className="text-sm font-bold text-gov-danger">
+                      Wybrana działka obejmuje wody powierzchniowe (jezioro,
+                      staw lub rzekę)
+                      {landUseCheck.featureName
+                        ? ` — ${landUseCheck.featureName}`
+                        : ""}
+                    </div>
+                    <p className="text-xs sm:text-sm text-gov-text mt-1 leading-relaxed">
+                      Analiza agrotechniczna, retencji glebowej oraz nawadniania
+                      upraw jest przeznaczona wyłącznie dla gruntów rolnych.
+                      Kliknij na mapie w pole uprawne lub użytek zielony.
+                    </p>
                   </div>
-                  <p className="text-xs text-gov-secondary mt-0.5">
-                    Sprawdź poniższe dane oraz zaznaczony obrys na mapie. Aby
-                    wybrać inne pole, kliknij w inną działkę na mapie.
-                  </p>
-                </div>
+                ) : landUseCheck?.status === "forest" ? (
+                  <div role="status" className="gov-callout-warning">
+                    <div className="text-sm font-bold text-gov-navy">
+                      Uwaga: wybrana działka obejmuje teren leśny lub
+                      zadrzewiony
+                      {landUseCheck.featureName
+                        ? ` (${landUseCheck.featureName})`
+                        : ""}
+                    </div>
+                    <p className="text-xs text-gov-text mt-1 leading-relaxed">
+                      Według map pokrycia terenu w tym miejscu znajduje się las.
+                      Jeśli część działki stanowi grunt rolny, możesz
+                      kontynuować lub wskazać na mapie sąsiednie pole uprawne.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="gov-callout-success">
+                    <div className="text-sm font-bold text-gov-navy">
+                      Wybrano działkę ewidencyjną
+                    </div>
+                    <p className="text-xs text-gov-secondary mt-0.5">
+                      Sprawdź poniższe dane oraz zaznaczony obrys na mapie. Aby
+                      wybrać inne pole, kliknij w inną działkę na mapie.
+                    </p>
+                  </div>
+                )}
 
                 <table className="gov-table border border-gov-border tabular-nums">
                   <tbody>
@@ -534,12 +612,84 @@ function Step1ParcelSearchContent() {
                 <div>
                   <button
                     type="button"
+                    disabled={landUseCheck?.canAnalyze === false}
                     onClick={handleProceedToStep2}
-                    className="gov-btn-primary w-full py-3 text-base"
+                    className="gov-btn-primary w-full py-3 text-base disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Dalej: Wybór uprawy i daty analizy (Krok 2)
+                    {landUseCheck?.canAnalyze === false
+                      ? "Analiza niedostępna dla zbiorników wodnych — wybierz pole"
+                      : "Dalej: Wybór uprawy i daty analizy (Krok 2)"}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* Moje Gospodarstwo — Ostatnio wybierane działki */}
+            {recentParcels.length > 0 && (
+              <div className="pt-4 border-t border-gov-border space-y-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h2 className="text-sm font-bold text-gov-navy">
+                    Moje gospodarstwo — ostatnio wybierane działki
+                  </h2>
+                  <span className="text-xs text-gov-secondary">
+                    Szybkie przełączanie
+                  </span>
+                </div>
+
+                <table className="gov-table border border-gov-border tabular-nums text-xs">
+                  <thead>
+                    <tr>
+                      <th>TERYT / Gmina</th>
+                      <th className="text-right">Powierzchnia</th>
+                      <th className="text-right">Akcja</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentParcels.map((item) => {
+                      const isCurrent = parcel?.teryt === item.teryt;
+                      return (
+                        <tr
+                          key={item.teryt}
+                          className={
+                            isCurrent ? "bg-gov-blue-light" : "bg-white"
+                          }
+                        >
+                          <td>
+                            <div className="font-mono font-bold text-gov-navy">
+                              {item.teryt}
+                            </div>
+                            <div className="text-[11px] text-gov-secondary">
+                              {item.commune || "—"}, obręb{" "}
+                              {item.precinct || "—"}
+                            </div>
+                          </td>
+                          <td className="text-right font-mono font-semibold">
+                            {item.area_ha} ha
+                          </td>
+                          <td className="text-right whitespace-nowrap space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => handleSelectRecentParcel(item)}
+                              className="text-gov-blue hover:underline font-semibold"
+                            >
+                              {isCurrent ? "Na mapie" : "Wybierz"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRemoveRecentParcel(item.teryt)
+                              }
+                              className="text-gov-muted hover:text-gov-danger"
+                              title="Usuń z listy"
+                            >
+                              Usuń
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

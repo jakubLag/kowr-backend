@@ -40,13 +40,6 @@ export default function AppFooter() {
         </div>
 
         <div className="pt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-gov-muted">
-          <div className="flex items-center gap-2.5">
-            <span className="font-black text-gov-text">gov.pl</span>
-            <span>|</span>
-            <span>
-              HackNation 2026 — Zadanie KOWR: „Zatrzymaj wodę, chroń plony”
-            </span>
-          </div>
           <span>Wszystkie dane prezentowane w serwisie mają charakter doradczy</span>
         </div>
       </div>

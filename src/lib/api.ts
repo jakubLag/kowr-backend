@@ -2,6 +2,7 @@ import {
   AnalyzeRequest,
   AnalysisResponse,
   CropInfo,
+  LandUseCheckResult,
   LocationSuggestion,
   ParcelSearchResponse,
 } from "@/types/analysis";
@@ -127,6 +128,35 @@ export async function searchLocations(
 
   const data = (await response.json()) as { results?: LocationSuggestion[] };
   return data.results || [];
+}
+
+export async function checkPointLandUse(
+  lat: number,
+  lon: number
+): Promise<LandUseCheckResult> {
+  try {
+    const response = await fetch(
+      `/api/landuse?lat=${encodeURIComponent(lat.toFixed(6))}&lon=${encodeURIComponent(lon.toFixed(6))}`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      }
+    );
+    if (!response.ok) {
+      return {
+        status: "agricultural",
+        label: "Grunt rolny",
+        canAnalyze: true,
+      };
+    }
+    return response.json();
+  } catch {
+    return {
+      status: "agricultural",
+      label: "Grunt rolny",
+      canAnalyze: true,
+    };
+  }
 }
 
 export async function fetchSupportedCrops(): Promise<CropInfo[]> {

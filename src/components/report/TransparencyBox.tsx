@@ -7,8 +7,20 @@ interface TransparencyBoxProps {
   metadata: ReportMetadata;
 }
 
+const DEFAULT_METHODOLOGICAL_LIMITATIONS = [
+  "Brak lokalnych pomiarów poziomu zwierciadła wód gruntowych na działce (analiza oparta na bilansie powierzchniowym i strefie korzeniowej 0–30 cm).",
+  "Parametry uziarnienia i pojemności wodnej gleby (ISRIC SoilGrids v2.0) są uśrednione dla siatki przestrzennej 250 × 250 m.",
+  "Dane meteorologiczne (Open-Meteo / ERA5) odzwierciedlają warunki dla komórki modelu pogodowego i mogą nie uwzględniać lokalnych opadów burzowych o bardzo małym zasięgu.",
+  "Wskaźniki satelitarne (Sentinel-2 L2A, rozdzielczość 10–20 m) obrazują stan łanu z dnia ostatniego bezchmurnego przelotu satelity.",
+];
+
 export default function TransparencyBox({ metadata }: TransparencyBoxProps) {
   const execSec = (metadata.execution_time_ms / 1000).toFixed(2);
+
+  const combinedLimitations = [
+    ...(metadata.limitations || []),
+    ...DEFAULT_METHODOLOGICAL_LIMITATIONS,
+  ];
 
   return (
     <section className="pt-8 border-t-2 border-gov-navy space-y-5 print:break-inside-avoid">
@@ -35,7 +47,7 @@ export default function TransparencyBox({ metadata }: TransparencyBoxProps) {
             <thead>
               <tr>
                 <th>Źródło danych</th>
-                <th>Data analizy</th>
+                <th>Data aktualności</th>
               </tr>
             </thead>
             <tbody>
@@ -73,8 +85,8 @@ export default function TransparencyBox({ metadata }: TransparencyBoxProps) {
               Analiza bazuje na publicznych danych satelitarnych i modelach
               meteorologicznych. Interpretując wyniki, należy uwzględnić:
             </p>
-            <ul className="list-disc list-inside space-y-1.5 text-sm text-gov-text">
-              {metadata.limitations.map((limitation, idx) => (
+            <ul className="list-disc list-inside space-y-1.5 text-xs sm:text-sm text-gov-text">
+              {combinedLimitations.map((limitation, idx) => (
                 <li key={idx} className="leading-relaxed">
                   {limitation}
                 </li>

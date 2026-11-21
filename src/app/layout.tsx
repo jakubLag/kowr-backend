@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title:
-    "System wsparcia gospodarowania wodą w rolnictwie — Krajowy Ośrodek Wsparcia Rolnictwa — Portal Gov.pl",
+    "System wsparcia gospodarowania wodą w rolnictwie — Krajowy Ośrodek Wsparcia Rolnictwa (KOWR)",
   description:
     "Publiczna e-usługa doradztwa wodnego i retencyjnego dla rolników. Ocena ryzyka suszy, wytyczne retencyjne oraz kalkulacja dawek nawadniania dla działek ewidencyjnych.",
 };

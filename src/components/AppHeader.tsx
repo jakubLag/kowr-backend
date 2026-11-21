@@ -28,38 +28,6 @@ export default function AppHeader({
 
   return (
     <header className="bg-white border-b border-gov-border print:hidden">
-      {/* Główny pasek gov.pl */}
-      <div className="border-b border-gov-border bg-white">
-        <div className="gov-container h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5 min-w-0">
-            <Link
-              href="/"
-              className="flex items-center gap-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gov-blue"
-            >
-              {/* Znak godła / sygnatura gov.pl */}
-              <span
-                aria-hidden="true"
-                className="w-7 h-8 bg-gov-red text-white font-bold text-xs flex items-center justify-center rounded-[1px] shrink-0 select-none"
-              >
-                PL
-              </span>
-              <span className="text-2xl font-black tracking-tight text-gov-text">
-                gov.pl
-              </span>
-            </Link>
-
-            <span
-              aria-hidden="true"
-              className="h-7 w-[2px] bg-gov-red shrink-0"
-            />
-
-            <span className="text-xs sm:text-sm text-gov-text font-normal leading-tight truncate">
-              Serwis Rzeczypospolitej Polskiej
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Pasek instytucji (KOWR) oraz ścieżka powrotu (Breadcrumbs) */}
       <div className="bg-gov-surface border-b border-gov-border">
         <div className="gov-container py-3 flex flex-col gap-1.5">

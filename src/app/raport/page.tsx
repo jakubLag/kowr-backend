@@ -25,6 +25,7 @@ import LoadingAnalysis from "@/components/LoadingAnalysis";
 import Step1Assessment from "@/components/report/Step1Assessment";
 import Step2Retention from "@/components/report/Step2Retention";
 import Step3Irrigation from "@/components/report/Step3Irrigation";
+import CropRotationComparison from "@/components/report/CropRotationComparison";
 import TransparencyBox from "@/components/report/TransparencyBox";
 
 function ReportPageContent() {
@@ -72,7 +73,7 @@ function ReportPageContent() {
         });
         setAnalysisResult(res);
         setSelectedRetentionIds(res.step2_retention.map((r) => r.id));
-        if (res.parcel_info) {
+        if (res.parcel_info && !currentParcel) {
           setParcel(res.parcel_info);
           saveStoredParcel(res.parcel_info);
         }
@@ -227,8 +228,8 @@ function ReportPageContent() {
             <header className="space-y-5">
               <div className="hidden print:flex items-center justify-between pb-3 border-b-2 border-gov-navy text-xs">
                 <div>
-                  <strong>gov.pl</strong> | Krajowy Ośrodek Wsparcia Rolnictwa —
-                  System Wsparcia Gospodarowania Wodą w Rolnictwie
+                  Krajowy Ośrodek Wsparcia Rolnictwa — System Wsparcia
+                  Gospodarowania Wodą w Rolnictwie
                 </div>
                 <div className="font-mono">
                   Data analizy: {analysisResult.metadata.analysis_date}
@@ -263,8 +264,8 @@ function ReportPageContent() {
                       {analysisResult.teryt}
                     </td>
                     <td>
-                      {analysisResult.parcel_info?.commune || parcel?.commune
-                        ? `gm. ${analysisResult.parcel_info?.commune || parcel?.commune}, obręb ${analysisResult.parcel_info?.precinct || parcel?.precinct || "—"}`
+                      {parcel?.commune || analysisResult.parcel_info?.commune
+                        ? `gm. ${parcel?.commune || analysisResult.parcel_info?.commune}, obręb ${parcel?.precinct || analysisResult.parcel_info?.precinct || "—"}`
                         : "Zgodnie z rejestrem ewidencji gruntów"}
                     </td>
                     <td className="font-mono font-bold">
@@ -312,6 +313,7 @@ function ReportPageContent() {
 
             <Step1Assessment
               diagnosis={analysisResult.step1_diagnosis}
+              parcelInfo={analysisResult.parcel_info || parcel}
               cropName={cropLabel}
               kcCoefficient={analysisResult.kc_coefficient}
               weatherSeries={weatherSeries}
@@ -332,6 +334,14 @@ function ReportPageContent() {
               cropName={cropLabel}
               simulation={retentionSimulation}
               forecastDays={forecastDays}
+            />
+
+            <CropRotationComparison
+              teryt={analysisResult.teryt}
+              currentCropId={cropParam}
+              currentKc={analysisResult.kc_coefficient}
+              analysisDate={dateParam || analysisResult.metadata.analysis_date}
+              diagnosis={analysisResult.step1_diagnosis}
             />
 
             <TransparencyBox metadata={analysisResult.metadata} />
