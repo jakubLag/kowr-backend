@@ -5,13 +5,11 @@ import {
   DailyWeatherPoint,
   IrrigationRecommendation,
 } from "@/types/analysis";
-import { RetentionSimulationSummary } from "@/lib/retentionSimulator";
 
 interface Step3IrrigationProps {
   irrigation: IrrigationRecommendation;
   areaHa: number;
   cropName: string;
-  simulation: RetentionSimulationSummary;
   forecastDays: DailyWeatherPoint[];
 }
 
@@ -41,13 +39,9 @@ export default function Step3Irrigation({
   irrigation,
   areaHa,
   cropName,
-  simulation,
   forecastDays,
 }: Step3IrrigationProps) {
-  const baseTotalM3 = Math.round(irrigation.dose_m3_per_ha * areaHa);
-  const adjustedDoseMm = simulation.irrigationDoseAfterMm;
-  const adjustedM3PerHa = Math.round(adjustedDoseMm * 10);
-  const adjustedTotalM3 = Math.round(adjustedM3PerHa * areaHa);
+  const totalCubicMeters = Math.round(irrigation.dose_m3_per_ha * areaHa);
 
   const forecast7dRainSum = Number(
     forecastDays
@@ -75,74 +69,49 @@ export default function Step3Irrigation({
             <p className="text-sm text-gov-text mt-1 leading-relaxed">
               {irrigation.justification}
             </p>
-            {simulation.selectedCount > 0 && (
-              <p className="text-xs text-gov-navy font-semibold mt-2">
-                Po uwzględnieniu {simulation.selectedCount} zabiegów
-                retencyjnych zaznaczonych w Etapie 2 wymagana dawka nawadniania
-                spada z{" "}
-                <span className="font-mono">
-                  {irrigation.dose_mm.toFixed(1)} mm
-                </span>{" "}
-                do{" "}
-                <span className="font-mono">
-                  {adjustedDoseMm.toFixed(1)} mm
-                </span>{" "}
-                (oszczędność{" "}
-                <span className="font-mono">
-                  {simulation.savedIrrigationM3Parcel} m³
-                </span>{" "}
-                wody na działce).
-              </p>
-            )}
           </div>
 
           <table className="gov-table border border-gov-border tabular-nums">
             <thead>
               <tr>
                 <th className="w-2/5">Parametr nawadniania</th>
-                <th>Wartość bazowa (bez retencji)</th>
-                <th>Po wdrożeniu retencji z Etapu 2</th>
+                <th>Wartość wyliczona dla działki</th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td className="font-bold">Zalecana dawka jednostkowa</td>
-                <td className="font-mono text-gov-secondary">
-                  {irrigation.dose_mm.toFixed(1)} mm ({irrigation.dose_mm.toFixed(1)} l/m²)
-                </td>
                 <td className="font-mono font-bold text-base text-gov-navy">
-                  {adjustedDoseMm.toFixed(1)} mm ({adjustedDoseMm.toFixed(1)} l/m²)
+                  {irrigation.dose_mm.toFixed(1)} mm{" "}
+                  <span className="text-sm font-normal text-gov-secondary">
+                    (odpowiada {irrigation.dose_mm.toFixed(1)} litrom wody na 1
+                    m²)
+                  </span>
                 </td>
               </tr>
               <tr>
                 <td className="font-bold">Objętość wody na 1 hektar</td>
-                <td className="font-mono text-gov-secondary">
-                  {Math.round(irrigation.dose_m3_per_ha)} m³ / ha
-                </td>
                 <td className="font-mono font-bold text-gov-navy">
-                  {adjustedM3PerHa} m³ / ha
+                  {Math.round(irrigation.dose_m3_per_ha)} m³ / ha
                 </td>
               </tr>
               <tr>
                 <td className="font-bold">
                   Całkowita objętość dla działki ({areaHa} ha)
                 </td>
-                <td className="font-mono text-gov-secondary">
-                  {baseTotalM3} m³ wody
-                </td>
                 <td className="font-mono font-bold text-gov-blue">
-                  {adjustedTotalM3} m³ wody
+                  {totalCubicMeters} m³ wody
                 </td>
               </tr>
               <tr>
                 <td className="font-bold">Rekomendowana technika</td>
-                <td colSpan={2} className="font-semibold text-gov-text">
+                <td className="font-semibold text-gov-text">
                   {irrigation.recommended_technique}
                 </td>
               </tr>
               <tr>
                 <td className="font-bold">Optymalna pora wykonania zabiegu</td>
-                <td colSpan={2} className="font-semibold text-gov-text">
+                <td className="font-semibold text-gov-text">
                   {irrigation.recommended_timing}
                 </td>
               </tr>

@@ -15,10 +15,7 @@ import {
   searchParcelByTeryt,
 } from "@/lib/api";
 import { getStoredParcel, saveStoredParcel } from "@/lib/parcelStore";
-import {
-  calculateRetentionSimulation,
-  getOrBuildDailyWeatherSeries,
-} from "@/lib/retentionSimulator";
+import { getOrBuildDailyWeatherSeries } from "@/lib/retentionSimulator";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 import LoadingAnalysis from "@/components/LoadingAnalysis";
@@ -39,9 +36,6 @@ function ReportPageContent() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] =
     useState<AnalysisResponse | null>(null);
-  const [selectedRetentionIds, setSelectedRetentionIds] = useState<string[]>(
-    []
-  );
 
   useEffect(() => {
     if (!terytParam) {
@@ -72,7 +66,6 @@ function ReportPageContent() {
           target_date: dateParam,
         });
         setAnalysisResult(res);
-        setSelectedRetentionIds(res.step2_retention.map((r) => r.id));
         if (res.parcel_info && !currentParcel) {
           setParcel(res.parcel_info);
           saveStoredParcel(res.parcel_info);
@@ -92,12 +85,6 @@ function ReportPageContent() {
 
     loadParcelAndAnalyze(terytParam);
   }, [terytParam, cropParam, dateParam]);
-
-  const handleToggleRetentionAction = (id: string) => {
-    setSelectedRetentionIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
 
   const handlePrintPdf = () => {
     window.print();
@@ -119,30 +106,6 @@ function ReportPageContent() {
     () => weatherSeries.filter((d) => d.is_forecast),
     [weatherSeries]
   );
-
-  const retentionSimulation = useMemo(() => {
-    if (!analysisResult) {
-      return {
-        selectedCount: 0,
-        totalWaterGainMm: 0,
-        totalWaterGainM3Parcel: 0,
-        newAwcMm: 0,
-        totalBufferDays: 0,
-        irrigationDoseBeforeMm: 0,
-        irrigationDoseAfterMm: 0,
-        savedIrrigationM3Parcel: 0,
-        totalSubsidyPlnPerHa: 0,
-        totalSubsidyPlnParcel: 0,
-      };
-    }
-    return calculateRetentionSimulation(
-      analysisResult.step2_retention,
-      selectedRetentionIds,
-      analysisResult.step1_diagnosis.awc_mm,
-      analysisResult.step3_irrigation.dose_mm,
-      analysisResult.parcel_info.area_ha
-    );
-  }, [analysisResult, selectedRetentionIds]);
 
   return (
     <div className="min-h-screen flex flex-col bg-white text-gov-text">
@@ -297,16 +260,10 @@ function ReportPageContent() {
                   <strong className="font-mono">
                     {analysisResult.step1_diagnosis.kbw_30d_mm} mm
                   </strong>
-                  ). Wdrożenie zalecanych praktyk retencyjnych w Etapie 2
-                  pozwoli zatrzymać na polu dodatkowo{" "}
-                  <strong className="font-mono">
-                    +{retentionSimulation.totalWaterGainM3Parcel} m³ wody
-                  </strong>{" "}
-                  oraz uzyskać ok.{" "}
-                  <strong className="font-mono">
-                    {retentionSimulation.totalSubsidyPlnParcel} zł/rok
-                  </strong>{" "}
-                  wsparcia z Ekoschematów ARiMR.
+                  ).{" "}
+                  {analysisResult.step3_irrigation.needed
+                    ? `W pierwszej kolejności wdróż priorytetowe zabiegi retencyjne z Etapu 2, a doraźnie zastosuj nawadnianie interwencyjne w dawce ${analysisResult.step3_irrigation.dose_mm} mm.`
+                    : "Dodatkowe nawadnianie interwencyjne nie jest obecnie wymagane — zaleca się wdrożenie praktyk retencyjnych wskazanych w Etapie 2."}
                 </p>
               </div>
             </header>
@@ -321,18 +278,12 @@ function ReportPageContent() {
 
             <Step2Retention
               recommendations={analysisResult.step2_retention}
-              selectedIds={selectedRetentionIds}
-              onToggleAction={handleToggleRetentionAction}
-              simulation={retentionSimulation}
-              baseAwcMm={analysisResult.step1_diagnosis.awc_mm}
-              areaHa={analysisResult.parcel_info.area_ha}
             />
 
             <Step3Irrigation
               irrigation={analysisResult.step3_irrigation}
               areaHa={analysisResult.parcel_info.area_ha}
               cropName={cropLabel}
-              simulation={retentionSimulation}
               forecastDays={forecastDays}
             />
 
