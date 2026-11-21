@@ -653,6 +653,29 @@ export default function Step1Assessment({
                   : "W bezpośrednim sąsiedztwie działki nie wykryto rowów melioracyjnych."}
               </td>
             </tr>
+            {diagnosis.nearest_river && (
+              <tr>
+                <td className="font-bold">
+                  Najbliższa rzeka i stan wody
+                  <span className="block text-xs font-normal text-gov-secondary">
+                    Stacja hydrologiczna IMGW-PIB
+                  </span>
+                </td>
+                <td className="font-semibold text-gov-navy">
+                  rzeka {diagnosis.nearest_river}
+                  {diagnosis.water_level_cm != null && (
+                    <span className="block font-mono text-xs text-gov-secondary font-normal">
+                      stan wody: {diagnosis.water_level_cm} cm
+                    </span>
+                  )}
+                </td>
+                <td className="text-gov-secondary">
+                  {diagnosis.river_distance_m != null
+                    ? `Stacja wodowskazowa IMGW w odległości ${(diagnosis.river_distance_m / 1000).toFixed(1)} km od działki.`
+                    : "Lokalna sieć zlewniowa IMGW-PIB."}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
 

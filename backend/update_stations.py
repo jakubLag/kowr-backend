@@ -15,7 +15,7 @@ TARGET_FILE = os.path.join(os.path.dirname(__file__), "app", "data", "imgw_stati
 def update_stations():
     print(f"Pobieranie stacji z IMGW: {IMGW_HYDRO_URL}...")
     try:
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=180.0) as client:
             resp = client.get(IMGW_HYDRO_URL)
             if resp.status_code == 200:
                 data = resp.json()
@@ -31,3 +31,4 @@ def update_stations():
 
 if __name__ == "__main__":
     update_stations()
+

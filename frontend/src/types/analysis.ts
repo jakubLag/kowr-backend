@@ -89,6 +89,9 @@ export interface Diagnosis {
   ndmi_current?: number | null;
   slope_percent: number;
   distance_to_ditch_m?: number | null;
+  nearest_river?: string | null;
+  river_distance_m?: number | null;
+  water_level_cm?: number | null;
   primary_causes: string[];
   precipitation_30d_mm?: number | null;
   et0_30d_mm?: number | null;
