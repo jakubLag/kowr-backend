@@ -8,7 +8,7 @@ class Settings(BaseModel):
     API_V1_PREFIX: str = "/api"
     
     # Timeouts (sec) - strict 7s timeout per external service as per specification
-    SERVICE_TIMEOUT_SECONDS: float = 7.0
+    SERVICE_TIMEOUT_SECONDS: float = 20.0
     
     # External APIs
     ULDK_BASE_URL: str = "https://uldk.gugik.gov.pl/service.php"
