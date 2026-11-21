@@ -22,6 +22,7 @@ class ParcelSearchResponse(BaseModel):
     center: PointCoordinates = Field(..., description="Reprezentatywny punkt działki (do wycentrowania mapy)")
     geometry: ParcelGeometry = Field(..., description="Geometria GeoJSON w układzie EPSG:4326")
     wkt_2180: Optional[str] = Field(None, description="Oryginalna geometria WKT z ULDK w układzie EPSG:2180")
+    is_fallback: bool = Field(default=False, description="Czy geometria i współrzędne zostały wygenerowane z modelu TERYT (np. w przypadku blokady/awarii ULDK)")
 
 # ----------------- ANALYZE SCHEMAS -----------------
 

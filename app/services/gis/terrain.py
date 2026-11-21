@@ -89,7 +89,7 @@ async def scan_for_ditch_along_perimeter(
     w poszukiwaniu rowów melioracyjnych na miedzach.
     Zwraca najkrótszy wykryty dystans w metrach lub None jeśli brak rowu w buforze.
     """
-    test_radii_m = [25.0, 60.0, 120.0]
+    test_radii_m = [25.0, 60.0, 300.0]
     # Wektorowe przesunięcia: N, S, E, W
     directions = [
         (1.0, 0.0),   # Północ
