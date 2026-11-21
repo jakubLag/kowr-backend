@@ -17,6 +17,7 @@ from app.services.gis.coordinates import transform_2180_to_4326, transform_coord
 
 # Inicjalizacja cache dla działek: max 500 elementów (bezpieczne dla 4GB RAM VPS), TTL 24 godziny
 parcel_cache = TTLCache(maxsize=500, ttl=86400)
+_parcel_point_cache = parcel_cache
 
 class ParcelNotFoundError(Exception):
     """Wyjątek rzucany, gdy ULDK nie odnajdzie działki w podanym punkcie."""

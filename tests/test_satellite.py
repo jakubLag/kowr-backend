@@ -21,7 +21,7 @@ async def test_fetch_sentinel_indices_schema():
 @pytest.mark.anyio
 async def test_satellite_cache():
     # Weryfikacja działania pamięci podręcznej (cache)
-    cache_key = (round(52.2, 4), round(21.0, 4), "2024-06-25")
+    cache_key = (round(52.2, 4), round(21.0, 4), "2024-06-25", "kukurydza")
     assert cache_key in _SATELLITE_CACHE
     
     cached_data = await fetch_sentinel_indices(lat=52.2, lon=21.0, target_date_str="2024-06-25")
