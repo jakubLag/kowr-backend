@@ -83,39 +83,51 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     # Bezpieczna obsługa pogody
     if isinstance(weather_data, Exception) or not weather_data:
-        limitations.append("Ostrzeżenie: Usługa pogodowa Open-Meteo niedostępna. Użyto awaryjnego modelu meteorologicznego.")
+        limitations.append("Meteorologia (Open-Meteo): Usługa chwilowo niedostępna – użyto referencyjnego modelu agrometeorologicznego.")
         weather_data = {
             "precipitation_30d_mm": 35.0, "precipitation_60d_mm": 70.0,
             "et0_30d_mm": 110.0, "et0_60d_mm": 210.0, "mean_temperature_c": 19.0,
             "is_fallback": True
         }
     elif weather_data.get("is_fallback"):
-        limitations.append("Wykorzystano zastępcze dane meteorologiczne z powodu problemów po stronie dostawcy.")
+        limitations.append("Meteorologia: Wykorzystano zastępczy model agroklimatyczny z powodu niedostępności dostawcy.")
 
-    # Bezpieczna obsługa satelity
+    # Bezpieczna obsługa satelity (Zero pozornej precyzji: brak sceny -> None)
     if isinstance(sentinel_data, Exception) or not sentinel_data:
-        limitations.append("Ostrzeżenie: Dane satelitarne Sentinel-2 chwilowo niedostępne. Wskaźniki NDVI/NDMI oszacowano historycznie.")
+        limitations.append("Teledetekcja Sentinel-2: Usługa STAC/CDSE niedostępna – brak możliwości wyliczenia NDVI/NDMI.")
         sentinel_data = {
-            "ndvi_current": 0.55, "ndvi_historical_median": 0.58, "ndvi_anomaly_percent": -5.0,
-            "ndmi_current": 0.20, "scene_date": "N/D", "cloud_cover_percent": 0.0,
-            "limitation_note": "Brak świeżej sceny satelitarnej (wysokie zachmurzenie lub awaria STAC)."
+            "ndvi_current": None, "ndvi_historical_median": None, "ndvi_anomaly_percent": None,
+            "ndmi_current": None, "scene_date": None, "cloud_cover_percent": None,
+            "is_fallback": True,
+            "limitation_note": "Brak danych satelitarnych Sentinel-2."
         }
     elif sentinel_data.get("limitation_note"):
         limitations.append(sentinel_data["limitation_note"])
 
-    # Bezpieczna obsługa gleby
-    if isinstance(soil_data, Exception) or not soil_data:
-        limitations.append("Ostrzeżenie: ISRIC SoilGrids niedostępne. Zastosowano domyślny profil gleby piaszczysto-gliniastej.")
-        soil_data = {
-            "soil_category": "średnia", "awc_mm": 120.0, "texture_name": "Gleba średnia (domyślna)"
-        }
+    # Bezpieczna obsługa gleby (Spójna skala AWC dla warstwy 0-30 cm: 30.9 mm)
+    if isinstance(soil_data, Exception) or not soil_data or soil_data.get("is_fallback"):
+        limitations.append("Gleba (ISRIC SoilGrids): Baza niedostępna – zastosowano profil referencyjny gleby lekkiej (piasek gliniasty, AWC: 30.9 mm dla 30 cm).")
+        if isinstance(soil_data, Exception) or not soil_data:
+            soil_data = {
+                "soil_category": "lekka", "awc_mm": 30.9, "texture_name": "piasek gliniasty (profil referencyjny)",
+                "is_fallback": True
+            }
 
     # Bezpieczna obsługa rzeźby terenu / hydro
     if isinstance(terrain_data, Exception) or not terrain_data:
-        limitations.append("Ostrzeżenie: Dane rzeźby terenu niedostępne. Przyjęto płaski teren bez rowów w pobliżu.")
+        limitations.append("Rzeźba terenu i hydrografia: Usługi NMT/IMGW niedostępne – przyjęto płaski teren (spadek 1.8%) bez rowów.")
         terrain_data = {
-            "slope_percent": 1.0, "distance_to_ditch_m": 1000.0
+            "slope_percent": 1.8, "is_slope_fallback": True, "distance_to_ditch_m": None
         }
+    else:
+        if terrain_data.get("is_slope_fallback"):
+            limitations.append("Numeryczny Model Terenu (NMT): Usługi wysokościowe niedostępne – spadek terenu oszacowano wartością 1.8%.")
+        if terrain_data.get("distance_to_ditch_m") is None:
+            limitations.append("Hydrografia: W buforze 500 m od działki nie zidentyfikowano rowów melioracyjnych ani cieków wodnych.")
+
+    # Flaga fallbacku z ULDK GUGiK
+    if getattr(parcel, "is_fallback", False):
+        limitations.append("ULDK GUGiK: Brak geometrii działki z państwowego rejestru katastralnego – przyjęto przybliżoną lokalizację z bazy TERYT.")
 
     # 3. Obliczenia agrohydrologiczne
     kbw_30d = calculate_kbw(
@@ -247,9 +259,14 @@ async def analyze_parcel(request: AnalyzeRequest):
 
         day_from = dec_idx * 10 + 1
         day_to = dec_idx * 10 + len(chunk)
+        if dec_idx >= 2:
+            period_label_txt = f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni) – Scenariusz agroklimatyczny"
+        else:
+            period_label_txt = f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni) – Prognoza synoptyczna"
+
         decades_list.append(DecadeForecastPoint(
             decade_number=dec_idx + 1,
-            period_label=f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni)",
+            period_label=period_label_txt,
             start_date=start_d,
             end_date=end_d,
             crop_kc=round(dec_kc, 2),

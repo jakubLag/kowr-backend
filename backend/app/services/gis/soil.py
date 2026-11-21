@@ -31,6 +31,7 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
     clay_pct = 12.0
     silt_pct = 26.0
     soc_pct = 1.4
+    is_fallback = True
 
     try:
         async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
@@ -61,6 +62,7 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
                     clay_pct = c
                     silt_pct = si if si is not None else (100.0 - sand_pct - clay_pct)
                     soc_pct = soc if soc is not None else 1.4
+                    is_fallback = False
     except Exception as e:
         print(f"Error api soil {e}")
 
@@ -78,6 +80,7 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
         "silt_percent": round(silt_pct, 1),
         "soc_percent": round(soc_pct, 2),
         "organic_matter_percent": round(soc_pct * 1.724, 2),
+        "is_fallback": is_fallback,
         **retention_data
     }
     _SOIL_CACHE[cache_key] = result

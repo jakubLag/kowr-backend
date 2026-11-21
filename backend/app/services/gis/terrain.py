@@ -6,6 +6,8 @@ Zgodnie z wytycznymi KOWR wyznacza:
 - Identyfikację najbliższej rzeki i stan wód z państwowej sieci pomiarowej IMGW-PIB.
 """
 
+import os
+import json
 import math
 import asyncio
 import logging
@@ -18,6 +20,14 @@ logger = logging.getLogger("terrain")
 
 _TERRAIN_CACHE: Dict[Tuple[float, float, Optional[float]], Dict[str, Any]] = {}
 _IMGW_STATIONS_CACHE: List[Dict[str, Any]] = []
+
+IMGW_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "imgw_stations.json")
+
+OVERPASS_MIRRORS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+]
 
 
 async def fetch_elevation_point(client: httpx.AsyncClient, northing: float, easting: float) -> Optional[float]:
@@ -33,12 +43,39 @@ async def fetch_elevation_point(client: httpx.AsyncClient, northing: float, east
     return None
 
 
-async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: float) -> float:
+async def fetch_elevation_open_meteo(client: httpx.AsyncClient, lat: float, lon: float) -> Optional[float]:
     """
-    Oblicza rzeczywiste nachylenie stoku (%) z NMT GUGiK.
-    Pobiera wysokość centralną oraz punkty oddalone o 100 m na północ i wschód,
-    wyznaczając dwuwymiarowy wektor gradientu wysokości:
-    slope = sqrt((dh_N/100)^2 + (dh_E/100)^2) * 100%
+    Alternatywne wyznaczenie spadku terenu za pomocą 5-punktowego zapytania do Open-Meteo Elevation API.
+    Próbkuje środek oraz punkty oddalone o 100 m na N, S, E, W.
+    """
+    try:
+        dlat = 100.0 / 111000.0
+        dlon = 100.0 / (111000.0 * max(0.2, math.cos(math.radians(lat))))
+        lats = [lat, lat + dlat, lat - dlat, lat, lat]
+        lons = [lon, lon, lon, lon + dlon, lon - dlon]
+        lats_str = ",".join(f"{round(x, 5)}" for x in lats)
+        lons_str = ",".join(f"{round(x, 5)}" for x in lons)
+
+        url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
+        resp = await client.get(url, timeout=2.5)
+        if resp.status_code == 200:
+            elevations = resp.json().get("elevation", [])
+            if len(elevations) == 5 and all(isinstance(h, (int, float)) for h in elevations):
+                h_c, h_n, h_s, h_e, h_w = elevations
+                dh_ns = abs(h_n - h_s) / 200.0
+                dh_ew = abs(h_e - h_w) / 200.0
+                gradient = math.sqrt(dh_ns * dh_ns + dh_ew * dh_ew)
+                slope = round(gradient * 100.0, 1)
+                return max(0.1, min(35.0, slope))
+    except Exception as e:
+        logger.debug(f"[Elevation API] Błąd Open-Meteo Elevation: {e}")
+    return None
+
+
+async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: float) -> Tuple[float, bool]:
+    """
+    Oblicza rzeczywiste nachylenie stoku (%) z NMT GUGiK lub zapasowo Open-Meteo Elevation.
+    Zwraca krotkę (slope_percent, is_fallback).
     """
     northing, easting = transform_4326_to_2180(lon, lat)
 
@@ -56,89 +93,123 @@ async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: f
             dh_east = (h_east - h_center) / 100.0
             gradient = math.sqrt(dh_north * dh_north + dh_east * dh_east)
             slope = round(gradient * 100.0, 1)
-            return max(0.1, min(35.0, slope))
-        else:
-            print("[GUGiK NMT] Brak odpowiedzi z serwera NMT (timeout/błąd) - zastosowano spadek domyślny 1.8%")
-            logger.warning("[GUGiK NMT] Brak pełnych danych wysokościowych - fallback 1.8%")
+            return max(0.1, min(35.0, slope)), False
     except Exception as e:
-        print(f"[GUGiK NMT] Błąd obliczania spadku: {e} - zastosowano spadek domyślny 1.8%")
-        logger.warning(f"[GUGiK NMT] Błąd obliczania spadku: {e}")
+        logger.debug(f"[GUGiK NMT] Błąd zapytania NMT: {e}")
 
-    return 1.8
+    # Próba pobrania z Open-Meteo Elevation API
+    elevation_slope = await fetch_elevation_open_meteo(client, lat, lon)
+    if elevation_slope is not None:
+        return elevation_slope, False
+
+    print("[GUGiK NMT] Brak odpowiedzi z NMT i Elevation API - zastosowano spadek domyślny 1.8% (fallback)")
+    return 1.8, True
 
 
 async def get_imgw_stations(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
-    """Pobiera i buforuje w pamięci listę państwowych stacji hydrologicznych IMGW-PIB."""
+    """
+    Pobiera i buforuje w pamięci listę państwowych stacji hydrologicznych IMGW-PIB.
+    W pierwszej kolejności czyta lokalną bazę JSON (czas odpowiedzi < 1 ms),
+    a w przypadku jej braku odpytuje API IMGW z limitem 2.0s.
+    """
     global _IMGW_STATIONS_CACHE
     if _IMGW_STATIONS_CACHE:
         return _IMGW_STATIONS_CACHE
+
+    if os.path.exists(IMGW_LOCAL_PATH):
+        try:
+            with open(IMGW_LOCAL_PATH, "r", encoding="utf-8") as f:
+                _IMGW_STATIONS_CACHE = json.load(f)
+                if _IMGW_STATIONS_CACHE:
+                    logger.info(f"[IMGW Hydro] Załadowano {_IMGW_STATIONS_CACHE.__len__()} stacji z lokalnej bazy.")
+                    return _IMGW_STATIONS_CACHE
+        except Exception as e:
+            logger.debug(f"[IMGW Hydro] Błąd odczytu lokalnej bazy stacji: {e}")
+
     try:
-        resp = await client.get(settings.IMGW_HYDRO_URL, timeout=4.0)
+        resp = await client.get(settings.IMGW_HYDRO_URL, timeout=2.0)
         if resp.status_code == 200:
             _IMGW_STATIONS_CACHE = resp.json()
-            logger.info(f"[IMGW Hydro] Załadowano {len(_IMGW_STATIONS_CACHE)} stacji hydrologicznych.")
             return _IMGW_STATIONS_CACHE
     except Exception as e:
-        logger.warning(f"[IMGW Hydro] Błąd pobierania stacji: {e}")
+        logger.debug(f"[IMGW Hydro] Błąd pobierania stacji z API: {e}")
     return []
 
 
-async def scan_for_ditch_along_perimeter(
+async def scan_for_ditch_overpass(
     client: httpx.AsyncClient,
     lat: float,
     lon: float
-) -> Optional[float]:
+) -> Tuple[Optional[float], Optional[List[List[float]]]]:
     """
-    Skanuje obrzeża działki (promienie 25m, 60m, 120m w 4 kierunkach)
-    w poszukiwaniu rowów melioracyjnych na miedzach.
-    Zwraca najkrótszy wykryty dystans w metrach lub None jeśli brak rowu w buforze.
+    Skanuje obrzeża działki (bufor 500 m) w poszukiwaniu rowów melioracyjnych i cieków w OpenStreetMap (Overpass API).
+    Wysyła zapytanie równolegle z twardym limitem 1.5 sekundy, aby nie spowalniać generowania raportu.
     """
-    test_radii_m = [25.0, 60.0, 300.0]
-    # Wektorowe przesunięcia: N, S, E, W
-    directions = [
-        (1.0, 0.0),   # Północ
-        (-1.0, 0.0),  # Południe
-        (0.0, 1.0),   # Wschód
-        (0.0, -1.0)   # Zachód
-    ]
+    query = f"""[out:json][timeout:2];
+(
+  way["waterway"~"ditch|drain|canal|stream"](around:500,{lat},{lon});
+);
+out geom;"""
 
-    for radius_m in test_radii_m:
-        dlat_deg = radius_m / 111000.0
-        dlon_deg = radius_m / 68000.0
+    async def _query_single_mirror(url: str) -> Optional[Tuple[float, List[List[float]]]]:
+        try:
+            resp = await client.post(
+                url,
+                data={"data": query},
+                headers={"User-Agent": "KOWR-WaterApp/1.0"},
+                timeout=1.5
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                elements = data.get("elements", [])
+                if not elements:
+                    return None
 
-        for dir_lat, dir_lon in directions:
-            sample_lat = lat + (dir_lat * dlat_deg)
-            sample_lon = lon + (dir_lon * dlon_deg)
-            delta = 0.002
+                min_dist = float("inf")
+                best_geom = None
+                for el in elements:
+                    geom = el.get("geometry", [])
+                    for pt in geom:
+                        dlat = (pt["lat"] - lat) * 111000.0
+                        dlon = (pt["lon"] - lon) * (111000.0 * max(0.2, math.cos(math.radians(lat))))
+                        dist = math.sqrt(dlat * dlat + dlon * dlon)
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_geom = [[p["lat"], p["lon"]] for p in geom]
 
-            wms_params = {
-                "SERVICE": "WMS",
-                "VERSION": "1.3.0",
-                "REQUEST": "GetFeatureInfo",
-                "LAYERS": "HY.Network",
-                "QUERY_LAYERS": "HY.Network",
-                "CRS": "EPSG:4326",
-                "BBOX": f"{sample_lat - delta},{sample_lon - delta},{sample_lat + delta},{sample_lon + delta}",
-                "WIDTH": "101",
-                "HEIGHT": "101",
-                "I": "50",
-                "J": "50",
-                "INFO_FORMAT": "application/json"
-            }
-            try:
-                wms_resp = await client.get(
-                    settings.HYDROPORTAL_WMS_URL,
-                    params=wms_params,
-                    timeout=1.5
-                )
-                if wms_resp.status_code == 200:
-                    data = wms_resp.json()
-                    if data.get("features"):
-                        return round(radius_m, 1)
-            except Exception:
-                pass
+                if min_dist <= 500.0 and best_geom:
+                    return round(min_dist, 1), best_geom
+        except Exception:
+            pass
+        return None
 
-    return None
+    # Równoległe odpytanie mirrorów – bierzemy pierwszą udaną odpowiedź w < 1.5s
+    tasks = [asyncio.create_task(_query_single_mirror(m)) for m in OVERPASS_MIRRORS]
+    try:
+        done, pending = await asyncio.wait(tasks, timeout=1.8, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            res = task.result()
+            if res is not None:
+                for p in pending:
+                    p.cancel()
+                return res
+        # Jeśli żaden z ukończonych nie miał wyniku, czekamy krótko na resztę
+        if pending:
+            done2, pending2 = await asyncio.wait(pending, timeout=0.5)
+            for p in pending2:
+                p.cancel()
+            for task in done2:
+                res = task.result()
+                if res is not None:
+                    return res
+    except Exception:
+        pass
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+
+    return None, None
 
 
 async def fetch_terrain_and_hydro(
@@ -171,7 +242,8 @@ async def fetch_terrain_and_hydro(
         # 2. Sprawdzenie sieci hydrologicznej IMGW-PIB (913 państwowych stacji rzecznych)
         stations_task = get_imgw_stations(client)
 
-        slope_percent, stations = await asyncio.gather(slope_task, stations_task)
+        slope_res, stations = await asyncio.gather(slope_task, stations_task)
+        slope_percent, is_slope_fallback = slope_res
 
         if stations:
             min_dist = float("inf")
@@ -200,21 +272,24 @@ async def fetch_terrain_and_hydro(
                         pass
 
         # 3. Odległość do rowu melioracyjnego
+        ditch_geometry = None
         if ditch_distance_m is not None:
-            # Priorytet 1: Użytkownik/rolnik wskazał rów obok działki
+            # Priorytet 1: Użytkownik/rolnik wskazał rów obok działki (z mapy lub suwaka)
             final_ditch_dist = max(0.0, round(float(ditch_distance_m), 1))
         else:
-            # Priorytet 2: Skanowanie obrzeży działki w buforze 500 m
-            scanned_dist = await scan_for_ditch_along_perimeter(client, lat, lon)
+            # Priorytet 2: Skanowanie wektorów cieków i rowów w promieniu 500 m (OpenStreetMap / BDOT10k)
+            scanned_dist, ditch_geom = await scan_for_ditch_overpass(client, lat, lon)
             if scanned_dist is not None:
                 final_ditch_dist = scanned_dist
+                ditch_geometry = ditch_geom
             else:
-                # W buforze 500m nie znaleziono rowu
                 final_ditch_dist = None
 
     result = {
         "slope_percent": slope_percent,
+        "is_slope_fallback": is_slope_fallback,
         "distance_to_ditch_m": final_ditch_dist,
+        "ditch_geometry": ditch_geometry,
         "nearest_river": nearest_river,
         "river_distance_m": river_distance_m,
         "water_level_cm": water_level_cm
