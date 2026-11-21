@@ -31,3 +31,7 @@ next-env.d.ts
 .DS_Store
 .vscode/
 .idea/
+
+# Dokumentacja / Notatki robocze
+PLAN_ZMIAN_KOWR.md
+
