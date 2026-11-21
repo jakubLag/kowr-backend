@@ -79,3 +79,19 @@ def test_report_generation():
     assert rec.dose_mm == 25.0
     assert rec.dose_m3_per_ha == 250.0
 
+def test_decision_engine_low_slope_ditch():
+    result = evaluate_rules(
+        kbw_30d=-10.0,
+        kbw_60d=-20.0,
+        awc_mm=60.0,
+        soil_category="srednia",
+        slope_percent=1.2,
+        distance_to_ditch_m=40.0,
+        ndvi_anomaly_percent=0.0,
+        crop_name="pszenica_ozima",
+        area_ha=3.0
+    )
+    causes_text = " ".join(result["primary_causes"])
+    assert "rowy nie wpływają na nawodnienie" in causes_text
+
+

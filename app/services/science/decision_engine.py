@@ -41,9 +41,10 @@ def evaluate_rules(
 
     if slope_percent >= 3.0:
         primary_causes.append(f"Spadek terenu {slope_percent:.1f}% powoduje intensywny spływ powierzchniowy wody przed jej wsiąknięciem w profil glebowy.")
-
-    if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
-        primary_causes.append(f"Bliskość otwartego rowu melioracyjnego ({distance_to_ditch_m:.0f} m) przyspiesza drenaż wód gruntowych z działki.")
+        if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
+            primary_causes.append(f"Bliskość otwartego rowu melioracyjnego ({distance_to_ditch_m:.0f} m) przyspiesza drenaż wód gruntowych z działki.")
+    else:
+        primary_causes.append(f"Nachylenie terenu ({slope_percent:.1f}%) jest na tyle małe, że rowy nie wpływają na nawodnienie.")
 
     if ndvi_anomaly_percent is not None and ndvi_anomaly_percent < -10.0:
         primary_causes.append(f"Kondycja biomasy (NDVI) jest o {abs(ndvi_anomaly_percent):.1f}% niższa od mediany wieloletniej, potwierdzając stres roślin.")

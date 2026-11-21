@@ -60,7 +60,17 @@ def generate_retention_actions(active_rules: List[Dict[str, Any]]) -> List[Reten
             continue
 
         try:
-            why_text = template["why"].format(**params)
+            if rule_id == "RETENTION_DITCH_WEIR" and params.get("slope", 0.0) < 3.0:
+                slope_val = params.get("slope", 0.0)
+                dist_val = params.get("dist_m", 0)
+                crop_val = params.get("crop", "uprawy")
+                why_text = (
+                    f"Nachylenie terenu ({slope_val:.1f}%) jest na tyle małe (< 3%), że rowy nie wpływają negatywnie "
+                    f"na nawodnienie. Zastawka na rowie w odległości {dist_val} m umożliwi jednak podsiąkowe "
+                    f"zatrzymanie wody dla uprawy {crop_val}."
+                )
+            else:
+                why_text = template["why"].format(**params)
             action_text = template["action"].format(**params)
         except Exception:
             why_text = template["why"]
