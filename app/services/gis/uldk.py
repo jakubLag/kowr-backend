@@ -4,7 +4,6 @@ Pobiera granice działki po identyfikatorze TERYT (np. 141201_1.0001.123/4).
 Zwraca geometrię GeoJSON w WGS84 (EPSG:4326), punkt centralny (representative_point) oraz pole w ha.
 """
 
-import re
 import math
 from typing import Dict, Any, Optional, Tuple, List
 import httpx
@@ -170,7 +169,3 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     )
     _PARCEL_CACHE[teryt] = response
     return response
-
-    # Zapis do cache przed zwrotem
-    parcel_cache[teryt] = result
-    return result
