@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color: #1b1b1b;
+    background-color: #ffffff;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  body {
+    color: #1b1b1b;
+    background-color: #ffffff;
+    font-feature-settings: "kern" 1, "tnum" 1;
+  }
+}
+
+@layer components {
+  .gov-container {
+    @apply max-w-[1180px] w-full mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .gov-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-gov-blue hover:bg-gov-blue-hover disabled:bg-gov-muted text-white font-semibold text-sm rounded-[2px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov-blue;
+  }
+
+  .gov-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-gov-blue-light text-gov-blue border border-gov-blue font-semibold text-sm rounded-[2px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov-blue;
+  }
+
+  .gov-btn-neutral {
+    @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white hover:bg-gov-surface text-gov-text border border-gov-border font-medium text-xs rounded-[2px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov-blue;
+  }
+
+  .gov-input {
+    @apply w-full h-11 px-3.5 py-2 bg-white border border-gov-input-border rounded-[2px] text-gov-text text-sm placeholder:text-gov-muted focus:border-gov-blue focus:outline-none focus:ring-2 focus:ring-gov-blue/25 transition-colors;
+  }
+
+  .gov-label {
+    @apply block text-sm font-bold text-gov-text mb-1;
+  }
+
+  .gov-hint {
+    @apply block text-xs text-gov-secondary mb-2;
+  }
+
+  .gov-callout-info {
+    @apply border-l-4 border-l-gov-blue bg-gov-blue-light p-4 sm:p-5 text-gov-text;
+  }
+
+  .gov-callout-success {
+    @apply border-l-4 border-l-gov-success bg-gov-success-bg p-4 sm:p-5 text-gov-text;
+  }
+
+  .gov-callout-warning {
+    @apply border-l-4 border-l-gov-warning bg-gov-warning-bg p-4 sm:p-5 text-gov-text;
+  }
+
+  .gov-callout-danger {
+    @apply border-l-4 border-l-gov-danger bg-gov-danger-bg p-4 sm:p-5 text-gov-text;
+  }
+
+  .gov-table {
+    @apply w-full text-sm border-collapse text-left;
+  }
+
+  .gov-table th {
+    @apply py-3 px-4 bg-gov-surface text-gov-text font-bold text-xs border-y border-gov-border;
+  }
+
+  .gov-table td {
+    @apply py-3 px-4 border-b border-gov-border text-gov-text align-top;
+  }
+}
+
+/* Dedykowane style do druku i eksportu PDF (format A4) */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #1b1b1b !important;
+    font-size: 10.5pt;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:block {
+    display: block !important;
+  }
+
+  .print\:break-inside-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
