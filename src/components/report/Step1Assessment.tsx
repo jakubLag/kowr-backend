@@ -105,10 +105,18 @@ export default function Step1Assessment({
     },
   ];
 
+  const formatDayMonth = (iso: string) => {
+    const parts = iso.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}.${parts[1]}`;
+    }
+    return iso;
+  };
+
   const timeSeriesChartData = weatherSeries.map((pt) => ({
     ...pt,
-    shortDate: pt.date.slice(5), // MM-DD
-    typeLabel: pt.is_forecast ? "Prognoza (7 dni)" : "Historia (30 dni)",
+    shortDate: formatDayMonth(pt.date), // DD.MM
+    typeLabel: pt.is_forecast ? "Prognoza (60 dni)" : "Historia (60 dni)",
   }));
 
   const lastHistoricalPoint = weatherSeries
@@ -434,8 +442,8 @@ export default function Step1Assessment({
                 {firstForecastPoint && lastForecastPoint && (
                   <ReferenceArea
                     yAxisId="kbw"
-                    x1={firstForecastPoint.date.slice(5)}
-                    x2={lastForecastPoint.date.slice(5)}
+                    x1={formatDayMonth(firstForecastPoint.date)}
+                    x2={formatDayMonth(lastForecastPoint.date)}
                     fill="#0052A5"
                     fillOpacity={0.07}
                   />
@@ -443,7 +451,7 @@ export default function Step1Assessment({
                 {lastHistoricalPoint && (
                   <ReferenceLine
                     yAxisId="kbw"
-                    x={lastHistoricalPoint.date.slice(5)}
+                    x={formatDayMonth(lastHistoricalPoint.date)}
                     stroke="#0B2240"
                     strokeWidth={2}
                     strokeDasharray="4 3"

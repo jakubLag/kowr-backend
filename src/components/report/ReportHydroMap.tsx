@@ -89,6 +89,7 @@ export default function ReportHydroMap({
             attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
             url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             maxZoom={19}
+            keepBuffer={2}
           />
           <WMSTileLayer
             url="https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution"
@@ -97,6 +98,7 @@ export default function ReportHydroMap({
             transparent={true}
             version="1.1.1"
             maxZoom={19}
+            keepBuffer={2}
           />
           <WMSTileLayer
             url="https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow"
@@ -106,6 +108,7 @@ export default function ReportHydroMap({
             version="1.1.1"
             maxZoom={19}
             opacity={0.85}
+            keepBuffer={2}
           />
 
           <FitParcelAndBuffer

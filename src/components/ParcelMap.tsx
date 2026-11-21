@@ -168,6 +168,15 @@ export default function ParcelMap({
   );
   const [justZoomedHint, setJustZoomedHint] = useState<boolean>(false);
 
+  // Rejestracja Service Workera cachującego kafelki mapy (GUGiK Orto, KIEG, Esri, OSM)
+  useEffect(() => {
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw-tiles.js").catch(() => {
+        // ignore registration errors in unsupported environments
+      });
+    }
+  }, []);
+
   const handleRecenter = () => {
     window.dispatchEvent(new CustomEvent("kowr-recenter-map"));
   };
@@ -301,17 +310,18 @@ export default function ParcelMap({
         >
           <ZoomControl position="bottomright" />
 
-          {/* Podkład bazowy: Esri World Imagery pod GUGiK jako szybkie tło przy małym przybliżeniu */}
+          {/* Podkład bazowy: szybkie pre-renderowane kafelki satelitarne Esri */}
           {(mapMode === "gugik" || mapMode === "hybrid") && (
             <TileLayer
               attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
               maxZoom={19}
+              keepBuffer={3}
             />
           )}
 
-          {/* Polska Ortofotomapa GUGiK (idealne spasowanie z granicami KIEG) */}
-          {mapMode === "gugik" && currentZoom >= 10 && (
+          {/* Polska Ortofotomapa GUGiK — włączana od poziomu pól (zoom >= 15), aby zoom-out działał błyskawicznie */}
+          {mapMode === "gugik" && currentZoom >= 15 && (
             <WMSTileLayer
               url="https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution"
               layers="Raster"
@@ -319,6 +329,7 @@ export default function ParcelMap({
               transparent={true}
               version="1.1.1"
               maxZoom={19}
+              keepBuffer={2}
               attribution="Ortofotomapa &copy; GUGiK"
             />
           )}
@@ -331,6 +342,7 @@ export default function ParcelMap({
               url="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
               maxZoom={19}
               opacity={0.9}
+              keepBuffer={3}
             />
           )}
 
@@ -340,6 +352,7 @@ export default function ParcelMap({
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               maxZoom={19}
+              keepBuffer={3}
             />
           )}
 
@@ -353,6 +366,7 @@ export default function ParcelMap({
               version="1.1.1"
               maxZoom={19}
               opacity={0.9}
+              keepBuffer={2}
               attribution="Ewidencja gruntów (KIEG) &copy; GUGiK"
             />
           )}
