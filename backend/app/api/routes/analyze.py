@@ -1,6 +1,7 @@
 import time
 import asyncio
 from datetime import datetime
+from datetime import date
 from fastapi import APIRouter, HTTPException, status
 
 from app.models.schemas import (
@@ -13,7 +14,12 @@ from app.models.schemas import (
     ClimateVulnerability10Y
 )
 from app.services.gis.uldk import fetch_parcel_from_uldk
-from app.services.gis.weather import fetch_weather_data, calculate_10y_vulnerability
+from app.services.gis.weather import (
+    fetch_weather_data,
+    calculate_10y_vulnerability,
+    fetch_10y_climatology,
+    analyze_climatology_metrics,
+)
 from app.services.gis.satellite import fetch_sentinel_indices
 from app.services.gis.soil import fetch_soil_properties
 from app.services.gis.terrain import fetch_terrain_and_hydro
@@ -61,7 +67,9 @@ async def analyze_parcel(request: AnalyzeRequest):
     kc = get_crop_kc(request.crop, month=month)
 
     # 2. Równoległe pobranie pozostałych 4 źródeł danych z return_exceptions=True (Graceful Degradation)
-    weather_task = fetch_weather_data(lat, lon, request.target_date)
+    target_date_converted = date.fromisoformat(request.target_date)
+    
+    weather_task = fetch_10y_climatology(lat, lon, target_date_converted)
     sentinel_task = fetch_sentinel_indices(lat, lon, request.target_date, crop_name=request.crop)
     soil_task = fetch_soil_properties(lat, lon)
     terrain_task = fetch_terrain_and_hydro(lat, lon, ditch_distance_m=request.ditch_distance_m)
