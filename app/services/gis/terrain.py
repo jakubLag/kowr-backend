@@ -143,7 +143,7 @@ async def scan_for_ditch_overpass(
 ) -> Tuple[Optional[float], Optional[List[List[float]]]]:
     """
     Skanuje obrzeża działki (bufor 500 m) w poszukiwaniu rowów melioracyjnych i cieków w OpenStreetMap (Overpass API).
-    Zwraca krotkę: (najkrótszy dystans w metrach, geometria_najbliższego_rowu).
+    Wysyła zapytanie równolegle z twardym limitem 1.5 sekundy, aby nie spowalniać generowania raportu.
     """
     query = f"""[out:json][timeout:2];
 (
@@ -151,19 +151,19 @@ async def scan_for_ditch_overpass(
 );
 out geom;"""
 
-    for mirror_url in OVERPASS_MIRRORS:
+    async def _query_single_mirror(url: str) -> Optional[Tuple[float, List[List[float]]]]:
         try:
             resp = await client.post(
-                mirror_url,
+                url,
                 data={"data": query},
                 headers={"User-Agent": "KOWR-WaterApp/1.0"},
-                timeout=2.0
+                timeout=1.5
             )
             if resp.status_code == 200:
                 data = resp.json()
                 elements = data.get("elements", [])
                 if not elements:
-                    return None, None
+                    return None
 
                 min_dist = float("inf")
                 best_geom = None
@@ -179,9 +179,35 @@ out geom;"""
 
                 if min_dist <= 500.0 and best_geom:
                     return round(min_dist, 1), best_geom
-                return None, None
         except Exception:
-            continue
+            pass
+        return None
+
+    # Równoległe odpytanie mirrorów – bierzemy pierwszą udaną odpowiedź w < 1.5s
+    tasks = [asyncio.create_task(_query_single_mirror(m)) for m in OVERPASS_MIRRORS]
+    try:
+        done, pending = await asyncio.wait(tasks, timeout=1.8, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            res = task.result()
+            if res is not None:
+                for p in pending:
+                    p.cancel()
+                return res
+        # Jeśli żaden z ukończonych nie miał wyniku, czekamy krótko na resztę
+        if pending:
+            done2, pending2 = await asyncio.wait(pending, timeout=0.5)
+            for p in pending2:
+                p.cancel()
+            for task in done2:
+                res = task.result()
+                if res is not None:
+                    return res
+    except Exception:
+        pass
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
 
     return None, None
 
