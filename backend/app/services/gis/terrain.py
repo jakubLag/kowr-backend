@@ -106,7 +106,7 @@ async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: f
     return 1.8, True
 
 
-async def get_imgw_stations(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+async def get_imgw_stations(client: Optional[httpx.AsyncClient] = None) -> List[Dict[str, Any]]:
     """
     Pobiera i buforuje w pamięci listę państwowych stacji hydrologicznych IMGW-PIB.
     W pierwszej kolejności czyta lokalną bazę JSON (czas odpowiedzi < 1 ms),
@@ -116,23 +116,31 @@ async def get_imgw_stations(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
     if _IMGW_STATIONS_CACHE:
         return _IMGW_STATIONS_CACHE
 
-    if os.path.exists(IMGW_LOCAL_PATH):
-        try:
-            with open(IMGW_LOCAL_PATH, "r", encoding="utf-8") as f:
-                _IMGW_STATIONS_CACHE = json.load(f)
-                if _IMGW_STATIONS_CACHE:
-                    logger.info(f"[IMGW Hydro] Załadowano {_IMGW_STATIONS_CACHE.__len__()} stacji z lokalnej bazy.")
-                    return _IMGW_STATIONS_CACHE
-        except Exception as e:
-            logger.debug(f"[IMGW Hydro] Błąd odczytu lokalnej bazy stacji: {e}")
+    candidate_paths = [
+        IMGW_LOCAL_PATH,
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "imgw_data_slim.json"),
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "imgw_stations.json"),
+    ]
 
-    try:
-        resp = await client.get(settings.IMGW_HYDRO_URL, timeout=2.0)
-        if resp.status_code == 200:
-            _IMGW_STATIONS_CACHE = resp.json()
-            return _IMGW_STATIONS_CACHE
-    except Exception as e:
-        logger.debug(f"[IMGW Hydro] Błąd pobierania stacji z API: {e}")
+    for p in candidate_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    _IMGW_STATIONS_CACHE = json.load(f)
+                    if _IMGW_STATIONS_CACHE:
+                        logger.info(f"[IMGW Hydro] Załadowano {len(_IMGW_STATIONS_CACHE)} stacji z lokalnego pliku: {p}")
+                        return _IMGW_STATIONS_CACHE
+            except Exception as e:
+                logger.debug(f"[IMGW Hydro] Błąd odczytu lokalnej bazy stacji ({p}): {e}")
+
+    if client:
+        try:
+            resp = await client.get(settings.IMGW_HYDRO_URL, timeout=2.0)
+            if resp.status_code == 200:
+                _IMGW_STATIONS_CACHE = resp.json()
+                return _IMGW_STATIONS_CACHE
+        except Exception as e:
+            logger.debug(f"[IMGW Hydro] Błąd pobierania stacji z API: {e}")
     return []
 
 
