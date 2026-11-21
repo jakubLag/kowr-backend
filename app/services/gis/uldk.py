@@ -5,6 +5,7 @@ Zwraca geometrię GeoJSON w WGS84 (EPSG:4326), punkt centralny (representative_p
 """
 
 import math
+import logging
 from typing import Dict, Any, Optional, Tuple, List
 import httpx
 from shapely import wkt
@@ -14,6 +15,8 @@ from cachetools import TTLCache
 from app.core.config import settings
 from app.models.schemas import ParcelSearchResponse, ParcelGeometry, PointCoordinates
 from app.services.gis.coordinates import transform_2180_to_4326, transform_coordinates_list
+
+logger = logging.getLogger("uldk")
 
 # Inicjalizacja cache dla działek: max 500 elementów (bezpieczne dla 4GB RAM VPS), TTL 24 godziny
 parcel_cache = TTLCache(maxsize=500, ttl=86400)
@@ -221,7 +224,9 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
                     raw2 = resp2.text.strip()
                     if raw2.startswith("0") and "POINT(90 90)" not in raw2 and "blocked for abuse" not in raw2:
                         wkt_str = extract_wkt_from_response(raw2)
-    except Exception:
+    except Exception as e:
+        print(f"[ULDK GUGiK] Błąd połączenia / timeout: {e}")
+        logger.warning(f"[ULDK GUGiK] Błąd połączenia: {e}")
         wkt_str = None
 
     if wkt_str:
@@ -235,6 +240,8 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
 
     if not parcel_geometry or not center_coords:
         is_fallback = True
+        print(f"[ULDK GUGiK] Serwer nie zwrócił geometrii dla {teryt} – aktywowano model regionalny TERYT")
+        logger.info(f"[ULDK GUGiK] Użyto fallbacku TERYT dla {teryt}")
         wkt_str, geojson_data, area_ha, (center_lon, center_lat) = generate_fallback_geometry(teryt)
         center_coords = PointCoordinates(lat=round(center_lat, 6), lon=round(center_lon, 6))
         parcel_geometry = ParcelGeometry(**geojson_data)

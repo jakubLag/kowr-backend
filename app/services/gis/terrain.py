@@ -28,8 +28,8 @@ async def fetch_elevation_point(client: httpx.AsyncClient, northing: float, east
         if resp.status_code == 200:
             text = resp.text.strip()
             return float(text)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[GUGiK NMT] Błąd zapytania o punkt wysokości: {e}")
     return None
 
 
@@ -57,7 +57,11 @@ async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: f
             gradient = math.sqrt(dh_north * dh_north + dh_east * dh_east)
             slope = round(gradient * 100.0, 1)
             return max(0.1, min(35.0, slope))
+        else:
+            print("[GUGiK NMT] Brak odpowiedzi z serwera NMT (timeout/błąd) - zastosowano spadek domyślny 1.8%")
+            logger.warning("[GUGiK NMT] Brak pełnych danych wysokościowych - fallback 1.8%")
     except Exception as e:
+        print(f"[GUGiK NMT] Błąd obliczania spadku: {e} - zastosowano spadek domyślny 1.8%")
         logger.warning(f"[GUGiK NMT] Błąd obliczania spadku: {e}")
 
     return 1.8
