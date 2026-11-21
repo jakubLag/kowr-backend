@@ -30,6 +30,30 @@ class AnalyzeRequest(BaseModel):
     crop: str = Field(default="kukurydza", description="Gatunek uprawy (np. kukurydza, pszenica_ozima, rzepak)")
     target_date: Optional[str] = Field(default=None, description="Data analizy w formacie YYYY-MM-DD (domyślnie bieżąca data)")
 
+class DailyWeatherPoint(BaseModel):
+    date: str = Field(..., description="Data w formacie YYYY-MM-DD")
+    precipitation_mm: float = Field(..., description="Dobowa suma opadów (mm)")
+    et0_mm: float = Field(..., description="Dobowa ewapotranspiracja referencyjna ET0 (mm)")
+    kbw_daily_mm: float = Field(..., description="Dobowy bilans wodny P - ET0*Kc (mm)")
+    kbw_cumulative_mm: float = Field(..., description="Skumulowany bilans wodny KBW (mm)")
+    is_forecast: bool = Field(default=False, description="True dla prognozy 60-dniowej, False dla historii")
+    temp_max_c: Optional[float] = Field(None, description="Średnia/maksymalna temperatura dobowa (°C)")
+    wind_max_ms: Optional[float] = Field(None, description="Maksymalna prędkość wiatru (m/s)")
+
+class DecadeForecastPoint(BaseModel):
+    decade_number: int = Field(..., description="Numer dekady prognozy (1..6, czyli +10..+60 dni)")
+    period_label: str = Field(..., description="Etykieta okresu (np. I dekada: +1–10 dni)")
+    start_date: str = Field(..., description="Początek dekady YYYY-MM-DD")
+    end_date: str = Field(..., description="Koniec dekady YYYY-MM-DD")
+    crop_kc: float = Field(..., description="Współczynnik roślinny Kc w danej dekadzie")
+    growth_stage: str = Field(..., description="Faza rozwojowa uprawy w danej dekadzie")
+    precipitation_mm: float = Field(..., description="Prognozowana suma opadów w dekadzie (mm)")
+    et0_mm: float = Field(..., description="Prognozowane parowanie referencyjne ET0 w dekadzie (mm)")
+    etc_mm: float = Field(..., description="Zapotrzebowanie wodne łanu ETc = ET0 * Kc (mm)")
+    kbw_decade_mm: float = Field(..., description="Bilans dekady P - ETc (mm)")
+    kbw_60d_rolling_mm: float = Field(..., description="Prognozowany 60-dniowy bilans kroczący KBW na koniec dekady (mm)")
+    risk_status: str = Field(..., description="Ocena ryzyka i rekomendacja na dekadę")
+
 class Diagnosis(BaseModel):
     kbw_30d_mm: float = Field(..., description="Klimatyczny Bilans Wodny za ostatnie 30 dni (mm)")
     kbw_60d_mm: float = Field(..., description="Klimatyczny Bilans Wodny za ostatnie 60 dni (mm)")
@@ -45,6 +69,16 @@ class Diagnosis(BaseModel):
     slope_percent: float = Field(..., description="Średni spadek terenu działki (%)")
     distance_to_ditch_m: Optional[float] = Field(None, description="Odległość do najbliższego rowu/cieku w buforze 500m (m)")
     primary_causes: List[str] = Field(..., description="Główne przyczyny deficytu wody zidentyfikowane na działce")
+    precipitation_30d_mm: Optional[float] = Field(None, description="Suma opadów z ostatnich 30 dni (mm)")
+    et0_30d_mm: Optional[float] = Field(None, description="Suma ET0 z ostatnich 30 dni (mm)")
+    forecast_7d_precip_mm: Optional[float] = Field(None, description="Prognozowana suma opadów na 7 dni (mm)")
+    forecast_7d_et0_mm: Optional[float] = Field(None, description="Prognozowana suma ET0 na 7 dni (mm)")
+    forecast_60d_precip_mm: Optional[float] = Field(None, description="Prognozowana suma opadów na 60 dni (mm)")
+    forecast_60d_et0_mm: Optional[float] = Field(None, description="Prognozowana suma ET0 na 60 dni (mm)")
+    forecast_60d_kbw_mm: Optional[float] = Field(None, description="Prognozowany bilans KBW za 60 dni (mm)")
+    critical_threshold_kbw_60d_mm: Optional[float] = Field(None, description="Próg krytyczny suszy IUNG-PIB dla danej kategorii gleby (mm)")
+    daily_weather_series: Optional[List[DailyWeatherPoint]] = Field(default=None, description="Szereg czasowy: 60 dni historii + 60 dni prognozy długoterminowej")
+    forecast_60d_decades: Optional[List[DecadeForecastPoint]] = Field(default=None, description="Prognoza długoterminowa na 60 dni w podziale na 6 dekad (po 10 dni)")
 
 class RetentionAction(BaseModel):
     id: str = Field(..., description="Unikalny identyfikator reguły")
