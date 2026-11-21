@@ -61,8 +61,8 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
                     clay_pct = c
                     silt_pct = si if si is not None else (100.0 - sand_pct - clay_pct)
                     soc_pct = soc if soc is not None else 1.4
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error api soil {e}")
 
     # Obliczenie Saxton & Rawls
     retention_data = calculate_saxton_rawls_awc(

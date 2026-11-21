@@ -2,6 +2,10 @@ import os
 from typing import List, Optional
 from pydantic import BaseModel
 
+
+CLOUD_COVER_MAX: int = 40
+
+
 def _load_env_file():
     """Wczytuje zmienne środowiskowe z pliku .env w katalogu głównym projektu."""
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
@@ -23,6 +27,7 @@ class Settings(BaseModel):
     VERSION: str = "1.0.0"
     API_V1_PREFIX: str = os.getenv("API_V1_PREFIX", "/api")
     
+    
     # Timeouts (sec) - strict 7s timeout per external service as per specification
     SERVICE_TIMEOUT_SECONDS: float = float(os.getenv("SERVICE_TIMEOUT_SECONDS", "7.0"))
     
@@ -41,6 +46,7 @@ class Settings(BaseModel):
     STAC_EARTH_SEARCH_URL: str = "https://earth-search.aws.element84.com/v1"
     GEOPORTAL_NMT_WCS_URL: str = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WCS/DemService"
     OVERPASS_API_URL: str = "https://overpass-api.de/api/interpreter"
+
 
     # CORS origins
     ALLOWED_ORIGINS: List[str] = [

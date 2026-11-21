@@ -16,12 +16,13 @@ Tryb awaryjny (Fallback):
 import io
 import time
 import logging
+
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple, List
 import httpx
 import rasterio
 from rasterio.warp import transform
-from app.core.config import settings
+from app.core.config import settings, CLOUD_COVER_MAX
 
 logger = logging.getLogger("satellite")
 
@@ -119,7 +120,7 @@ async def fetch_indices_from_cdse(
         # Sortuj sceny wg zachmurzenia (rosnąco), wybierając najmniej zachmurzoną
         clear_features = [
             f for f in features
-            if f.get("properties", {}).get("eo:cloud_cover", 100) < 15
+            if f.get("properties", {}).get("eo:cloud_cover", 100) < CLOUD_COVER_MAX
         ]
 
         if not clear_features:
