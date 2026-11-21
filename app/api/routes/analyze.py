@@ -7,6 +7,7 @@ from app.models.schemas import (
     AnalyzeRequest,
     AnalysisResponse,
     DailyWeatherPoint,
+    DecadeForecastPoint,
     Diagnosis,
     ReportMetadata
 )
@@ -155,13 +156,39 @@ async def analyze_parcel(request: AnalyzeRequest):
         crop_name=request.crop
     )
 
-    # Diagnoza (Etap 1)
+    # Diagnoza (Etap 1) + Szereg 60 dni historii i 60 dni prognozy długoterminowej (6 dekad)
+    soil_thresholds = {
+        "bardzo lekka": -130.0,
+        "lekka": -160.0,
+        "średnia": -190.0,
+        "ciężka": -220.0,
+    }
+    crit_threshold_60d = soil_thresholds.get(soil_data["soil_category"].lower(), -170.0)
+
+    def _growth_stage_for_month(m: int) -> str:
+        if m <= 3:
+            return "Spoczynek / ruszenie wegetacji"
+        if m == 4:
+            return "Wschody i faza początkowa"
+        if m in (5, 6):
+            return "Intensywny wzrost wegetatywny"
+        if m in (7, 8):
+            return "Faza krytyczna (kwitnienie i budowa plonu)"
+        if m in (9, 10):
+            return "Dojrzewanie i zbiory"
+        return "Okres jesienno-zimowy (retencja pozimowa)"
+
     daily_series = []
     cum_kbw = 0.0
     for pt in weather_data.get("raw_daily_series", []):
         p_val = pt["precipitation_mm"]
         et0_val = pt["et0_mm"]
-        kbw_d = round(p_val - (et0_val * kc), 1)
+        try:
+            pt_month = int(pt["date"].split("-")[1])
+        except Exception:
+            pt_month = month
+        day_kc = get_crop_kc(request.crop, month=pt_month) if pt["is_forecast"] else kc
+        kbw_d = round(p_val - (et0_val * day_kc), 1)
         cum_kbw = round(cum_kbw + kbw_d, 1)
         daily_series.append(DailyWeatherPoint(
             date=pt["date"],
@@ -173,6 +200,58 @@ async def analyze_parcel(request: AnalyzeRequest):
             temp_max_c=pt.get("temp_max_c"),
             wind_max_ms=pt.get("wind_max_ms"),
         ))
+
+    # Budowa 6 dekad (po 10 dni = 60 dni prognozy długoterminowej)
+    forecast_points = [d for d in daily_series if d.is_forecast]
+    roman_numerals = ["I", "II", "III", "IV", "V", "VI"]
+    decades_list = []
+    rolling_kbw_60d = kbw_60d
+
+    for dec_idx in range(6):
+        chunk = forecast_points[dec_idx * 10 : (dec_idx + 1) * 10]
+        if not chunk:
+            break
+        start_d = chunk[0].date
+        end_d = chunk[-1].date
+        try:
+            dec_month = int(start_d.split("-")[1])
+        except Exception:
+            dec_month = month
+        dec_kc = get_crop_kc(request.crop, month=dec_month)
+        dec_stage = _growth_stage_for_month(dec_month)
+        dec_p = round(sum(c.precipitation_mm for c in chunk), 1)
+        dec_et0 = round(sum(c.et0_mm for c in chunk), 1)
+        dec_etc = round(dec_et0 * dec_kc, 1)
+        dec_kbw = round(dec_p - dec_etc, 1)
+
+        # Kroczący bilans 60-dniowy przesuwa się o kolejną dekadę
+        rolling_kbw_60d = round(rolling_kbw_60d * (50.0 / 60.0) + dec_kbw, 1)
+
+        if rolling_kbw_60d < crit_threshold_60d:
+            risk_msg = f"Wysokie ryzyko suszy (przekroczony próg IUNG {crit_threshold_60d:.0f} mm) — wymagana rezerwa nawodnieniowa"
+        elif dec_kbw < -18.0:
+            risk_msg = "Rosnący deficyt w dekadzie — priorytet zatrzymania wody w glebie i rowach"
+        else:
+            risk_msg = "Bilans dekadowy stabilny — naturalna retencja glebowa wystarczająca"
+
+        day_from = dec_idx * 10 + 1
+        day_to = dec_idx * 10 + len(chunk)
+        decades_list.append(DecadeForecastPoint(
+            decade_number=dec_idx + 1,
+            period_label=f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni)",
+            start_date=start_d,
+            end_date=end_d,
+            crop_kc=round(dec_kc, 2),
+            growth_stage=dec_stage,
+            precipitation_mm=dec_p,
+            et0_mm=dec_et0,
+            etc_mm=dec_etc,
+            kbw_decade_mm=dec_kbw,
+            kbw_60d_rolling_mm=rolling_kbw_60d,
+            risk_status=risk_msg,
+        ))
+
+    forecast_60d_kbw_total = round(sum(d.kbw_decade_mm for d in decades_list), 1) if decades_list else None
 
     step1_diag = Diagnosis(
         kbw_30d_mm=kbw_30d,
@@ -193,7 +272,12 @@ async def analyze_parcel(request: AnalyzeRequest):
         et0_30d_mm=weather_data.get("et0_30d_mm"),
         forecast_7d_precip_mm=weather_data.get("forecast_7d_precip_mm"),
         forecast_7d_et0_mm=weather_data.get("forecast_7d_et0_mm"),
+        forecast_60d_precip_mm=weather_data.get("forecast_60d_precip_mm"),
+        forecast_60d_et0_mm=weather_data.get("forecast_60d_et0_mm"),
+        forecast_60d_kbw_mm=forecast_60d_kbw_total,
+        critical_threshold_kbw_60d_mm=crit_threshold_60d,
         daily_weather_series=daily_series or None,
+        forecast_60d_decades=decades_list or None,
     )
 
     sources = [
