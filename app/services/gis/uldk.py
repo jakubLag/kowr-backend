@@ -89,9 +89,12 @@ def extract_wkt_from_response(raw_text: str) -> Optional[str]:
             return line
     return None
 
+_PARCEL_CACHE: Dict[str, ParcelSearchResponse] = {}
+
 async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     """
-    Wysyła asynchroniczne zapytanie do ULDK GUGiK z uwzględnieniem cachowania w pamięci.
+    Wysyła asynchroniczne zapytanie do ULDK GUGiK.
+    Wykorzystuje pamięć podręczną (cache).
     """
     teryt = teryt.strip()
 
@@ -153,7 +156,7 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     if not geojson_data:
         wkt_str, geojson_data, area_ha, (center_lon, center_lat) = generate_fallback_geometry(teryt)
 
-    result = ParcelSearchResponse(
+    response = ParcelSearchResponse(
         teryt=teryt,
         voivodeship=metadata["voivodeship"],
         county=metadata["county"],
@@ -165,6 +168,8 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
         geometry=ParcelGeometry(**geojson_data),
         wkt_2180=wkt_str
     )
+    _PARCEL_CACHE[teryt] = response
+    return response
 
     # Zapis do cache przed zwrotem
     parcel_cache[teryt] = result
