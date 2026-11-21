@@ -28,23 +28,35 @@ def evaluate_rules(
     primary_causes = []
     active_rules = []
 
-    # 1. Analiza przyczyn deficytu
-    if kbw_60d < -100:
+    is_waterlogged = kbw_30d > max(35.0, awc_mm * 0.85) or kbw_60d > max(60.0, awc_mm * 1.4)
+
+    # 1. Analiza przyczyn deficytu lub nadmiaru wody
+    if is_waterlogged:
+        primary_causes.append(
+            f"Nadwyżka opadów nad parowaniem (KBW 30d: +{kbw_30d:.1f} mm, KBW 60d: +{kbw_60d:.1f} mm) "
+            f"przekracza pojemność wodną warstwy ornej (AWC: {awc_mm:.1f} mm) — ryzyko zastoisk wodnych i niedotlenienia korzeni."
+        )
+    elif kbw_60d < -100:
         primary_causes.append(f"Głęboki ujemny bilans opadów do parowania (KBW 60d: {kbw_60d:.1f} mm).")
     elif kbw_30d < -50:
         primary_causes.append(f"Krótkoterminowy deficyt opadów w kluczowej fazie wegetacji (KBW 30d: {kbw_30d:.1f} mm).")
 
-    if awc_mm < 35:
-        primary_causes.append(f"Bardzo niska retencja glebowa (AWC: {awc_mm:.1f} mm, kategoria {soil_category}) – woda opadowa natychmiast ucieka do głębszych warstw.")
-    elif awc_mm < 50:
-        primary_causes.append(f"Ograniczona pojemność wodna gleby lekkiej (AWC: {awc_mm:.1f} mm) sprzyja szybkiemu przesychaniu wierzchniej warstwy.")
+    if not is_waterlogged:
+        if awc_mm < 35:
+            primary_causes.append(f"Bardzo niska retencja glebowa (AWC: {awc_mm:.1f} mm, kategoria {soil_category}) – woda opadowa natychmiast ucieka do głębszych warstw.")
+        elif awc_mm < 50:
+            primary_causes.append(f"Ograniczona pojemność wodna gleby lekkiej (AWC: {awc_mm:.1f} mm) sprzyja szybkiemu przesychaniu wierzchniej warstwy.")
 
     if slope_percent >= 3.0:
         primary_causes.append(f"Spadek terenu {slope_percent:.1f}% powoduje intensywny spływ powierzchniowy wody przed jej wsiąknięciem w profil glebowy.")
-        if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
-            primary_causes.append(f"Bliskość otwartego rowu melioracyjnego ({distance_to_ditch_m:.0f} m) przyspiesza drenaż wód gruntowych z działki.")
     else:
         primary_causes.append(f"Nachylenie terenu ({slope_percent:.1f}%) jest na tyle małe, że rowy nie wpływają na nawodnienie.")
+
+    if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
+        if is_waterlogged:
+            primary_causes.append(f"Obecność rowu melioracyjnego w odległości {distance_to_ditch_m:.0f} m wymaga utrzymania drożności odpływu w celu odprowadzenia wody zastoiskowej.")
+        else:
+            primary_causes.append(f"Bliskość otwartego rowu melioracyjnego ({distance_to_ditch_m:.0f} m) przyspiesza drenaż wód gruntowych z działki.")
 
     if ndvi_anomaly_percent is not None and ndvi_anomaly_percent < -10.0:
         primary_causes.append(f"Kondycja biomasy (NDVI) jest o {abs(ndvi_anomaly_percent):.1f}% niższa od mediany wieloletniej, potwierdzając stres roślin.")
@@ -52,20 +64,42 @@ def evaluate_rules(
     if not primary_causes:
         primary_causes.append("Warunki wodne i wilgotnościowe w granicach normy wieloletniej.")
 
-    # 2. Dobór reguł retencyjnych (Zasada: 'Retain water where it falls')
-
-    # Reguła A: Zastawka na rowie melioracyjnym (Priorytet 1 - retencja krajobrazowa)
-    if distance_to_ditch_m is not None and distance_to_ditch_m <= 300:
+    # 2. Dobór reguł retencyjnych i melioracyjnych
+    if is_waterlogged:
+        if distance_to_ditch_m is not None and distance_to_ditch_m <= 300:
+            active_rules.append({
+                "rule_id": "DRAINAGE_DITCH_OPEN_WEIR",
+                "priority": 1,
+                "category": "landscape",
+                "params": {
+                    "kbw_30d": kbw_30d,
+                    "dist_m": round(distance_to_ditch_m),
+                    "crop": crop_name
+                }
+            })
         active_rules.append({
-            "rule_id": "RETENTION_DITCH_WEIR",
+            "rule_id": "SOIL_WATERLOGGING_SUBSOILING",
             "priority": 1,
-            "category": "landscape",
+            "category": "soil",
             "params": {
-                "slope": slope_percent,
-                "dist_m": round(distance_to_ditch_m),
+                "kbw_30d": kbw_30d,
+                "awc": awc_mm,
                 "crop": crop_name
             }
         })
+    else:
+        # Reguła A: Zastawka na rowie melioracyjnym (Priorytet 1 - retencja krajobrazowa)
+        if distance_to_ditch_m is not None and distance_to_ditch_m <= 300:
+            active_rules.append({
+                "rule_id": "RETENTION_DITCH_WEIR",
+                "priority": 1,
+                "category": "landscape",
+                "params": {
+                    "slope": slope_percent,
+                    "dist_m": round(distance_to_ditch_m),
+                    "crop": crop_name
+                }
+            })
 
     # Reguła B: Międzyplony i mulczowanie (Retencja glebowa - niska AWC)
     if awc_mm < 55 or soil_category in ["bardzo lekka", "lekka"]:

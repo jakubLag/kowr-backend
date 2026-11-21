@@ -41,6 +41,18 @@ EXPERT_TEMPLATES: Dict[str, Dict[str, str]] = {
         "badge": "Mikro-retencja wodna (Priorytet 3)",
         "why": "Powierzchnia {area_ha:.2f} ha generuje znaczną objętość spływu burzowego podczas nawalnych deszczy przy łącznym deficycie 60-dniowym KBW {kbw_60d:.1f} mm.",
         "action": "Utwórz w naturalnym obniżeniu terenu bezodpływową nieckę bioretencyjną lub mały staw śródpolny do 1000 m², co kwalifikuje się do dofinansowania z programów retencyjnych KOWR / ARiMR.",
+    },
+    "DRAINAGE_DITCH_OPEN_WEIR": {
+        "title": "Regulacja odpływu na rowie melioracyjnym (odprowadzenie nadmiaru wody)",
+        "badge": "Melioracja dwukierunkowa (Priorytet 1)",
+        "why": "Na działce występuje znaczna nadwyżka wody (KBW 30d: +{kbw_30d:.1f} mm), a w odległości {dist_m} m znajduje się rów melioracyjny. Zbyt wysoki poziom wody grozi uduszeniem systemu korzeniowego uprawy ({crop}).",
+        "action": "Otwórz zastawkę piętrzącą i udrożnij przepusty na rowie melioracyjnym do czasu odprowadzenia wody zastoiskowej, a po ustabilizowaniu wilgotności ponownie zamknij zastawkę, aby zachować rezerwę na okres letni.",
+    },
+    "SOIL_WATERLOGGING_SUBSOILING": {
+        "title": "Głęboszowanie przełamujące podeszwę płużną i ochrona przed ugniataniem",
+        "badge": "Napowietrzenie profilu glebowego (Priorytet 1)",
+        "why": "Nadmiar opadów (+{kbw_30d:.1f} mm) przekroczył pojemność wodną warstwy ornej (AWC: {awc:.1f} mm), powodując wypchnięcie powietrza z porów glebowych i powstawanie zastoisk powierzchniowych.",
+        "action": "Wstrzymaj wjazd ciężkim sprzętem na przelaną glebę (aby nie zniszczyć jej struktury), a po obeschnięciu wykonaj głęboszowanie (35–45 cm) ułatwiające przesiąkanie nadmiaru wody do głębszych warstw.",
     }
 }
 

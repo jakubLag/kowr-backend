@@ -15,16 +15,15 @@ def calculate_kbw(precipitation_mm: float, et0_mm: float, kc: float) -> float:
     kbw = precipitation_mm - etc
     return round(kbw, 1)
 
-def evaluate_drought_risk(kbw_30d: float, kbw_60d: float, soil_category: str) -> Tuple[str, str]:
+def evaluate_drought_risk(
+    kbw_30d: float,
+    kbw_60d: float,
+    soil_category: str,
+    awc_mm: float = 40.0
+) -> Tuple[str, str]:
     """
-    Ocenia stopień zagrożenia suszą rolniczą wg kryteriów zbliżonych do Systemu Monitoringu Suszy Rolniczej (IUNG-PIB).
-    Kategorie gleb IUNG:
-    - Kategoria I (gleba bardzo lekka / piasek): próg KBW ok. -130 do -150 mm
-    - Kategoria II (gleba lekka / piasek gliniasty): próg KBW ok. -160 do -180 mm
-    - Kategoria III (gleba średnia / pyły, gliny lekkie): próg KBW ok. -190 do -210 mm
-    - Kategoria IV (gleba ciężka / gliny, iły): próg KBW ok. -220 do -250 mm
+    Ocenia stopień zagrożenia suszą rolniczą ORAZ nadmiernym uwilgotnieniem gleby (przelaniem / podtopieniem).
     """
-    # Progi dla 60-dniowego KBW
     thresholds = {
         "bardzo lekka": -130.0,
         "lekka": -160.0,
@@ -32,6 +31,8 @@ def evaluate_drought_risk(kbw_30d: float, kbw_60d: float, soil_category: str) ->
         "ciężka": -220.0
     }
     crit_threshold = thresholds.get(soil_category.lower(), -170.0)
+    waterlogging_threshold_30d = max(35.0, awc_mm * 0.85)
+    waterlogging_threshold_60d = max(60.0, awc_mm * 1.4)
 
     if kbw_60d < crit_threshold or kbw_30d < (crit_threshold * 0.65):
         risk = "WYSOKIE"
@@ -42,6 +43,9 @@ def evaluate_drought_risk(kbw_30d: float, kbw_60d: float, soil_category: str) ->
     elif kbw_60d < 0:
         risk = "NISKIE"
         status = "Lekki deficyt bilansowy, rośliny w normie"
+    elif kbw_30d > waterlogging_threshold_30d or kbw_60d > waterlogging_threshold_60d:
+        risk = "NADMIAR WODY"
+        status = "Nadmierne uwilgotnienie gleby (ryzyko zastoisk wodnych i niedotlenienia korzeni)"
     else:
         risk = "BRAK"
         status = "Dodatni bilans wodny (optymalne uwilgotnienie)"

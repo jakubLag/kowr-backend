@@ -126,11 +126,12 @@ async def analyze_parcel(request: AnalyzeRequest):
         kc=kc
     )
 
-    # Ocena ryzyka suszy
+    # Ocena ryzyka suszy oraz nadmiernego uwilgotnienia
     drought_risk, kbw_status = evaluate_drought_risk(
         kbw_30d=kbw_30d,
         kbw_60d=kbw_60d,
-        soil_category=soil_data["soil_category"]
+        soil_category=soil_data["soil_category"],
+        awc_mm=soil_data["awc_mm"]
     )
 
     # 4. Deterministyczny silnik decyzyjny (Decision Engine)
@@ -179,8 +180,10 @@ async def analyze_parcel(request: AnalyzeRequest):
         return "Okres jesienno-zimowy (retencja pozimowa)"
 
     daily_series = []
-    cum_kbw = 0.0
-    for pt in weather_data.get("raw_daily_series", []):
+    daily_kbw_values = []
+    raw_series = weather_data.get("raw_daily_series", [])
+
+    for idx, pt in enumerate(raw_series):
         p_val = pt["precipitation_mm"]
         et0_val = pt["et0_mm"]
         try:
@@ -189,13 +192,18 @@ async def analyze_parcel(request: AnalyzeRequest):
             pt_month = month
         day_kc = get_crop_kc(request.crop, month=pt_month) if pt["is_forecast"] else kc
         kbw_d = round(p_val - (et0_val * day_kc), 1)
-        cum_kbw = round(cum_kbw + kbw_d, 1)
+        daily_kbw_values.append(kbw_d)
+
+        # Kroczący bilans 60-dniowy (okno ruchome do 60 dni wstecz, zgodnie z metodyką IUNG-PIB)
+        window_start = max(0, idx - 59)
+        rolling_60d = round(sum(daily_kbw_values[window_start : idx + 1]), 1)
+
         daily_series.append(DailyWeatherPoint(
             date=pt["date"],
             precipitation_mm=p_val,
             et0_mm=et0_val,
             kbw_daily_mm=kbw_d,
-            kbw_cumulative_mm=cum_kbw,
+            kbw_cumulative_mm=rolling_60d,
             is_forecast=pt["is_forecast"],
             temp_max_c=pt.get("temp_max_c"),
             wind_max_ms=pt.get("wind_max_ms"),
