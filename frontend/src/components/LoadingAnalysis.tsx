@@ -79,7 +79,7 @@ export default function LoadingAnalysis({
     >
       <div className="border-b border-gov-border pb-4">
         <p className="text-xs font-bold text-gov-blue mb-1">
-          Trwa generowanie raportu (szacowany czas: 10–25 sekund)
+          Trwa generowanie raportu (szacowany czas: 5-10 sekund)
         </p>
         <h1 className="text-2xl font-bold text-gov-navy">
           {LOADING_STEPS[stepIndex].title}

@@ -632,7 +632,7 @@ function Step1ParcelSearchContent() {
                   >
                     {landUseCheck?.canAnalyze === false
                       ? "Analiza niedostępna dla zbiorników wodnych — wybierz pole"
-                      : "Dalej: Wybór uprawy i daty analizy (Krok 2)"}
+                      : "Wybór uprawy i daty analizy"}
                   </button>
                 </div>
               </div>

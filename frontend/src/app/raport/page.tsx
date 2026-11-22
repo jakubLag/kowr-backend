@@ -243,8 +243,8 @@ function ReportPageContent() {
                 className="gov-btn-primary"
               >
                 {viewMode === "basic"
-                  ? "Pobierz raport PDF (wersja podstawowa)"
-                  : "Pobierz pełny raport PDF"}
+                  ? "Pobierz podstawowy raport"
+                  : "Pobierz pełny raport"}
               </button>
             </div>
 
@@ -256,7 +256,7 @@ function ReportPageContent() {
                 </div>
                 <p className="text-xs text-gov-secondary">
                   {viewMode === "basic"
-                    ? "Widok podstawowy — najważniejsze wnioski i zalecenia prostym językiem dla rolnika."
+                    ? "Widok podstawowy — najważniejsze wnioski i zalecenia."
                     : "Pełny raport szczegółowy — wykresy, dane satelitarne Sentinel-2, mapa, 6 dekad i źródła."}
                 </p>
               </div>
@@ -445,14 +445,14 @@ function ReportPageContent() {
 
                 <div className="pt-4 border-t border-gov-border flex flex-wrap items-center justify-between gap-3 print:hidden">
                   <span className="text-xs text-gov-secondary">
-                    Przeglądasz pełny raport szczegółowy (wersja doradcza).
+                    Przeglądasz pełny raport szczegółowy.
                   </span>
                   <button
                     type="button"
                     onClick={() => handleSwitchViewMode("basic")}
                     className="gov-btn-secondary text-xs py-2 px-4"
                   >
-                    ← Wróć do uproszczonego widoku dla rolnika
+                    ← Wróć do podstawowego widoku
                   </button>
                 </div>
               </>
