@@ -276,7 +276,7 @@ function ReportPageContent() {
                       : "text-gov-text hover:bg-gov-surface"
                   }`}
                 >
-                  Widok dla rolnika (podstawowy)
+                  Raport podstawowy
                 </button>
                 <button
                   type="button"
@@ -289,7 +289,7 @@ function ReportPageContent() {
                       : "text-gov-text hover:bg-gov-surface"
                   }`}
                 >
-                  Pełny raport szczegółowy
+                  Raport szczegółowy
                 </button>
               </div>
             </div>
