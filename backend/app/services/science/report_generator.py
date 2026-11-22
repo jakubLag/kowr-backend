@@ -53,6 +53,18 @@ EXPERT_TEMPLATES: Dict[str, Dict[str, str]] = {
         "badge": "Napowietrzenie profilu glebowego (Priorytet 1)",
         "why": "Nadmiar opadów (+{kbw_30d:.1f} mm) przekroczył pojemność wodną warstwy ornej (AWC: {awc:.1f} mm), powodując wypchnięcie powietrza z porów glebowych i powstawanie zastoisk powierzchniowych.",
         "action": "Wstrzymaj wjazd ciężkim sprzętem na przelaną glebę (aby nie zniszczyć jej struktury), a po obeschnięciu wykonaj głęboszowanie (35–45 cm) ułatwiające przesiąkanie nadmiaru wody do głębszych warstw.",
+    },
+    "WETLAND_POND_PROTECTION": {
+        "title": "Ochrona i strefa buforowa przy oczkach wodnych lub mokradłach",
+        "badge": "Retencja krajobrazowa (Priorytet 2)",
+        "why": "W promieniu 500 m od działki zidentyfikowano naturalne oczka wodne, zbiorniki lub mokradła, które stabilizują lokalny mikroklimat i zasilają wody gruntowe dla uprawy ({crop}).",
+        "action": "Nie osuszaj ani nie zasypuj obniżeń z wodą. Utrzymuj 3–5 m zadarnionej strefy buforowej wokół zbiornika/mokradła bez stosowania nawozów i środków ochrony roślin, aby spowolnić odpływ i chronić naturalną retencję.",
+    },
+    "WINDBREAK_SHELTERBELT": {
+        "title": "Zakładanie zadrzewień śródpolnych i pasów wiatrochronnych",
+        "badge": "Retencja krajobrazowa (Priorytet 3)",
+        "why": "W promieniu 300 m od działki nie wykryto zadrzewień śródpolnych ani żywopłotów, co przy deficycie wody (KBW 30d: {kbw_30d:.1f} mm) zwiększa prędkość wiatru nad łanem ({crop}) i przyspiesza parowanie z gleby.",
+        "action": "Wzdłuż miedz i dróg dojazdowych (prostopadle do dominujących wiatrów zachodnich) załóż pasy krzewów i drzew rodzimych. Zadrzewienia śródpolne ograniczają parowanie terenowe o 15–25% i zatrzymują śnieg zimą.",
     }
 }
 
@@ -72,15 +84,23 @@ def generate_retention_actions(active_rules: List[Dict[str, Any]]) -> List[Reten
             continue
 
         try:
-            if rule_id == "RETENTION_DITCH_WEIR" and params.get("slope", 0.0) < 3.0:
-                slope_val = params.get("slope", 0.0)
+            if rule_id == "RETENTION_DITCH_WEIR":
+                slope_val = params.get("slope")
                 dist_val = params.get("dist_m", 0)
                 crop_val = params.get("crop", "uprawy")
-                why_text = (
-                    f"Nachylenie terenu ({slope_val:.1f}%) jest na tyle małe (< 3%), że rowy nie wpływają negatywnie "
-                    f"na nawodnienie. Zastawka na rowie w odległości {dist_val} m umożliwi jednak podsiąkowe "
-                    f"zatrzymanie wody dla uprawy {crop_val}."
-                )
+                if slope_val is None:
+                    why_text = (
+                        f"Działka znajduje się zaledwie {dist_val} m od rowu melioracyjnego. "
+                        f"Zastawka spowolni odpływ i umożliwi podsiąkowe zatrzymanie wody dla uprawy {crop_val}."
+                    )
+                elif slope_val < 3.0:
+                    why_text = (
+                        f"Nachylenie terenu ({slope_val:.1f}%) jest na tyle małe (< 3%), że rowy nie wpływają negatywnie "
+                        f"na nawodnienie. Zastawka na rowie w odległości {dist_val} m umożliwi jednak podsiąkowe "
+                        f"zatrzymanie wody dla uprawy {crop_val}."
+                    )
+                else:
+                    why_text = template["why"].format(**params)
             else:
                 why_text = template["why"].format(**params)
             action_text = template["action"].format(**params)

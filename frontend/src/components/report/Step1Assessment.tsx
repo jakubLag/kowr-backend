@@ -750,6 +750,11 @@ export default function Step1Assessment({
                 {diagnosis.slope_percent != null
                   ? `${diagnosis.slope_percent.toFixed(1)}%`
                   : "Brak danych"}
+                {diagnosis.aspect_direction && (
+                  <span className="block font-sans text-xs font-normal text-gov-secondary">
+                    spływ: {diagnosis.aspect_direction}
+                  </span>
+                )}
               </td>
               <td className="text-gov-secondary">
                 {diagnosis.slope_percent == null
@@ -767,6 +772,11 @@ export default function Step1Assessment({
                 {diagnosis.distance_to_ditch_m != null
                   ? `${Math.round(diagnosis.distance_to_ditch_m)} m`
                   : "Brak w buforze 500 m"}
+                {diagnosis.nearest_waterway_type && (
+                  <span className="block font-sans text-xs font-normal text-gov-secondary">
+                    typ: {diagnosis.nearest_waterway_type}
+                  </span>
+                )}
               </td>
               <td className="text-gov-secondary">
                 {diagnosis.distance_to_ditch_m != null
@@ -774,6 +784,58 @@ export default function Step1Assessment({
                   : "W bezpośrednim sąsiedztwie działki nie wykryto rowów melioracyjnych."}
               </td>
             </tr>
+            {(diagnosis.has_wetland_or_pond_nearby != null ||
+              diagnosis.has_windbreak_nearby != null) && (
+              <tr>
+                <td className="font-bold">
+                  Elementy krajobrazowe i retencja naturalna (OSM)
+                </td>
+                <td className="text-xs font-semibold space-y-1">
+                  {diagnosis.has_wetland_or_pond_nearby != null && (
+                    <div>
+                      Oczka / mokradła (500 m):{" "}
+                      <span
+                        className={
+                          diagnosis.has_wetland_or_pond_nearby
+                            ? "text-gov-success font-bold"
+                            : "text-gov-secondary"
+                        }
+                      >
+                        {diagnosis.has_wetland_or_pond_nearby
+                          ? "wykryto"
+                          : "brak"}
+                      </span>
+                    </div>
+                  )}
+                  {diagnosis.has_windbreak_nearby != null && (
+                    <div>
+                      Zadrzewienia / żywopłoty (300 m):{" "}
+                      <span
+                        className={
+                          diagnosis.has_windbreak_nearby
+                            ? "text-gov-success font-bold"
+                            : "text-gov-warning font-bold"
+                        }
+                      >
+                        {diagnosis.has_windbreak_nearby
+                          ? "wykryto"
+                          : "brak"}
+                      </span>
+                    </div>
+                  )}
+                </td>
+                <td className="text-gov-secondary">
+                  {diagnosis.has_wetland_or_pond_nearby
+                    ? "Oczka wodne i mokradła w otoczeniu stabilizują lokalny bilans wodny — warto chronić ich strefę buforową. "
+                    : ""}
+                  {diagnosis.has_windbreak_nearby === false
+                    ? "Brak zadrzewień śródpolnych w promieniu 300 m zwiększa parowanie powodowane przez wiatr."
+                    : diagnosis.has_windbreak_nearby === true
+                      ? "Obecność zadrzewień śródpolnych ogranicza wiatr i parowanie z pola."
+                      : ""}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
 

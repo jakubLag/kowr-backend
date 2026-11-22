@@ -69,6 +69,21 @@ export const RETENTION_ENRICHMENT_BY_ID: Record<string, RetentionFallbackMeta> =
       "Programy małej retencji rolniczej (ARiMR / WFOŚiGW — budowa oczek wodnych i zbiorników retencyjnych)",
     ecoscheme_code: "PS WPR / NFOŚiGW",
   },
+  WETLAND_POND_PROTECTION: {
+    water_gain_mm: 25,
+    drought_buffer_days: 7,
+    ecoscheme_name:
+      "Norma GAEC 2 / GAEC 8 (ochrona torfowisk, mokradeł i oczek wodnych) + Ekoschemat: Obszary z roślinami miododajnymi / strefy buforowe",
+    ecoscheme_code: "GAEC 2 / GAEC 8",
+  },
+  WINDBREAK_SHELTERBELT: {
+    water_gain_mm: 18,
+    drought_buffer_days: 5,
+    ecoscheme_name:
+      "Interwencja PS WPR: Zakładanie zadrzewień śródpolnych i systemów rolno-leśnych (ARiMR)",
+    ecoscheme_code: "I.10.10 / I.10.11",
+    ecoscheme_pln_per_ha: 1100,
+  },
 };
 
 export function checkIsWaterlogged(diagnosis?: Diagnosis | null): boolean {

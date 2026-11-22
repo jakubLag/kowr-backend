@@ -109,10 +109,27 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     # Bezpieczna obsługa rzeźby terenu / hydro
     if isinstance(terrain_data, Exception) or not terrain_data:
-        limitations.append("Ostrzeżenie: Dane rzeźby terenu niedostępne. Przyjęto płaski teren bez rowów w pobliżu.")
+        limitations.append("Ostrzeżenie: Dane rzeźby terenu i hydrografii (DEM / Overpass API) były chwilowo niedostępne.")
         terrain_data = {
-            "slope_percent": 1.0, "distance_to_ditch_m": 1000.0
+            "slope_percent": None,
+            "aspect_direction": None,
+            "dem_source": None,
+            "dem_available": False,
+            "dem_limitation": None,
+            "distance_to_ditch_m": None,
+            "hydro_data_available": False,
+            "hydro_limitation": None,
+            "nearest_waterway_coords": None,
+            "nearest_waterway_point": None,
+            "nearest_waterway_type": None,
+            "has_wetland_or_pond_nearby": None,
+            "has_windbreak_nearby": None,
         }
+    else:
+        if terrain_data.get("dem_available") is False and terrain_data.get("dem_limitation"):
+            limitations.append(terrain_data["dem_limitation"])
+        if terrain_data.get("hydro_data_available") is False and terrain_data.get("hydro_limitation"):
+            limitations.append(terrain_data["hydro_limitation"])
 
     # 3. Obliczenia agrohydrologiczne
     kbw_30d = calculate_kbw(
@@ -144,7 +161,9 @@ async def analyze_parcel(request: AnalyzeRequest):
         distance_to_ditch_m=terrain_data["distance_to_ditch_m"],
         ndvi_anomaly_percent=sentinel_data["ndvi_anomaly_percent"],
         crop_name=request.crop,
-        area_ha=parcel.area_ha
+        area_ha=parcel.area_ha,
+        has_wetland_or_pond_nearby=terrain_data.get("has_wetland_or_pond_nearby"),
+        has_windbreak_nearby=terrain_data.get("has_windbreak_nearby"),
     )
 
     # 5. Generowanie ustrukturyzowanych kart zaleceń (Report Generator)
@@ -274,7 +293,13 @@ async def analyze_parcel(request: AnalyzeRequest):
         ndvi_anomaly_percent=sentinel_data["ndvi_anomaly_percent"],
         ndmi_current=sentinel_data["ndmi_current"],
         slope_percent=terrain_data["slope_percent"],
+        aspect_direction=terrain_data.get("aspect_direction"),
         distance_to_ditch_m=terrain_data["distance_to_ditch_m"],
+        nearest_waterway_coords=terrain_data.get("nearest_waterway_coords"),
+        nearest_waterway_point=terrain_data.get("nearest_waterway_point"),
+        nearest_waterway_type=terrain_data.get("nearest_waterway_type"),
+        has_wetland_or_pond_nearby=terrain_data.get("has_wetland_or_pond_nearby"),
+        has_windbreak_nearby=terrain_data.get("has_windbreak_nearby"),
         primary_causes=rules_eval["primary_causes"],
         precipitation_30d_mm=weather_data.get("precipitation_30d_mm"),
         et0_30d_mm=weather_data.get("et0_30d_mm"),
@@ -288,12 +313,13 @@ async def analyze_parcel(request: AnalyzeRequest):
         forecast_60d_decades=decades_list or None,
     )
 
+    dem_source_label = terrain_data.get("dem_source") or "DEM (niedostępny)"
     sources = [
         "Granice działki: ULDK GUGiK (Główny Urząd Geodezji i Kartografii)",
         "Meteorologia: Open-Meteo Archive / Forecast API (metodyka FAO-56 Penman-Monteith)",
         "Teledetekcja: Copernicus Data Space Ecosystem (CDSE) / Sentinel-2 L2A Process API",
         "Gleba i uziarnienie: ISRIC SoilGrids v2.0 REST API + równania Saxtona & Rawlsa (2006)",
-        "Hydrografia i rzeźba: IMGW-PIB Hydro / PGW Wody Polskie Hydroportal + Geoportal NMT"
+        f"Hydrografia i rzeźba: OpenStreetMap Overpass API + {dem_source_label} + IMGW-PIB Hydro"
     ]
 
     exec_time_ms = int((time.time() - start_time) * 1000)

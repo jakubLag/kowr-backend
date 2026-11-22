@@ -42,6 +42,7 @@ class Settings(BaseModel):
     ULDK_BASE_URL: str = "https://uldk.gugik.gov.pl/service.php"
     OPEN_METEO_BASE_URL: str = "https://archive-api.open-meteo.com/v1/archive"
     OPEN_METEO_FORECAST_URL: str = "https://api.open-meteo.com/v1/forecast"
+    OPEN_METEO_ELEVATION_URL: str = "https://api.open-meteo.com/v1/elevation"
     SOILGRIDS_BASE_URL: str = "https://rest.isric.org/soilgrids/v2.0/properties/query"
     STAC_EARTH_SEARCH_URL: str = "https://earth-search.aws.element84.com/v1"
     GEOPORTAL_NMT_WCS_URL: str = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WCS/DemService"
@@ -49,6 +50,7 @@ class Settings(BaseModel):
     IMGW_HYDRO_URL: str = "https://danepubliczne.imgw.pl/api/data/hydro/"
     HYDROPORTAL_WMS_URL: str = "https://wody.isok.gov.pl/wss/INSPIRE/INSPIRE_HY_10k_2019_WMS"
     OVERPASS_API_URL: str = "https://overpass-api.de/api/interpreter"
+    OVERPASS_FALLBACK_URL: str = "https://overpass.private.coffee/api/interpreter"
 
 
     # CORS origins
