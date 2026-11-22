@@ -2,15 +2,21 @@
 
 import React from "react";
 import {
+  DailyWeatherPoint,
   DecadeForecastPoint,
+  Diagnosis,
   IrrigationRecommendation,
 } from "@/types/analysis";
+import { computeWeatherWindowSummary } from "@/lib/reportHelpers";
 
 interface Step3IrrigationProps {
   irrigation?: IrrigationRecommendation | null;
   areaHa?: number | null;
   cropName?: string;
   forecastDecades?: DecadeForecastPoint[] | null;
+  diagnosis?: Diagnosis;
+  weatherSeries?: DailyWeatherPoint[];
+  isArchive?: boolean;
 }
 
 export default function Step3Irrigation({
@@ -18,6 +24,9 @@ export default function Step3Irrigation({
   areaHa = 1.0,
   cropName = "uprawa",
   forecastDecades = [],
+  diagnosis,
+  weatherSeries = [],
+  isArchive = false,
 }: Step3IrrigationProps) {
   if (!irrigation) {
     return null;
@@ -37,6 +46,12 @@ export default function Step3Irrigation({
   const totalCubicMeters = Math.round(safeDoseM3 * safeAreaHa);
 
   const safeDecades = Array.isArray(forecastDecades) ? forecastDecades : [];
+  const weatherWindowSummary = computeWeatherWindowSummary(
+    irrigation,
+    diagnosis,
+    weatherSeries,
+    isArchive
+  );
 
   const total60dPrecip = Number(
     safeDecades
@@ -142,28 +157,52 @@ export default function Step3Irrigation({
                     "Wyłącznie godziny wczesnoporanne lub nocne"}
                 </td>
               </tr>
+              <tr>
+                <td className="font-bold">
+                  Okno pogodowe (najbliższe 7 dni)
+                </td>
+                <td
+                  className={`text-sm font-medium ${
+                    weatherWindowSummary.tone === "warning"
+                      ? "text-gov-warning font-semibold"
+                      : "text-gov-text"
+                  }`}
+                >
+                  {weatherWindowSummary.text}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
       ) : (
-        <div className="gov-callout-success">
-          <div className="text-sm font-bold text-gov-navy">
-            Status: {irrigation.status || "Nawadnianie nie jest obecnie konieczne"}
+        <div className="space-y-4">
+          <div className="gov-callout-success">
+            <div className="text-sm font-bold text-gov-navy">
+              Status:{" "}
+              {irrigation.status || "Nawadnianie nie jest obecnie konieczne"}
+            </div>
+            <p className="text-sm text-gov-text mt-1 leading-relaxed">
+              {irrigation.justification ||
+                "Bilans wodny gleby jest stabilny lub niedobór mieści się w granicach tolerancji roślin. Priorytetem pozostaje retencja glebowa i krajobrazowa z Etapu 2."}
+            </p>
           </div>
-          <p className="text-sm text-gov-text mt-1 leading-relaxed">
-            {irrigation.justification ||
-              "Bilans wodny gleby jest stabilny lub niedobór mieści się w granicach tolerancji roślin. Priorytetem pozostaje retencja glebowa i krajobrazowa z Etapu 2."}
-          </p>
+          <div className="border border-gov-border bg-gov-surface/60 px-4 py-3 text-xs text-gov-text">
+            <strong className="text-gov-navy">
+              Okno pogodowe (najbliższe 7 dni):
+            </strong>{" "}
+            {weatherWindowSummary.text}
+          </div>
         </div>
       )}
 
-      {/* 3.1. Długoterminowa prognoza potrzeb wodnych na 60 dni (6 dekad po 10 dni) */}
+      {/* 3.1. Zestawienie dekadowe na 60 dni (prognoza lub weryfikacja ex-post) */}
       {safeDecades.length > 0 && (
         <div className="space-y-3 pt-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-base font-bold text-gov-navy">
-              3.1. Długoterminowa prognoza potrzeb wodnych uprawy na 60 dni (6
-              dekad po 10 dni)
+              {isArchive
+                ? "3.1. Weryfikacja ex-post potrzeb wodnych uprawy w kolejnych 60 dniach (6 dekad po badanej dacie)"
+                : "3.1. Długoterminowa prognoza potrzeb wodnych uprawy na 60 dni (6 dekad po 10 dni)"}
             </h3>
             <span className="text-xs font-semibold text-gov-secondary tabular-nums">
               Horyzont 60 dni — opad:{" "}

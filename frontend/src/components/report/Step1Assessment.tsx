@@ -44,6 +44,8 @@ interface Step1AssessmentProps {
   kcCoefficient: number;
   weatherSeries: DailyWeatherPoint[];
   forecastDecades: DecadeForecastPoint[];
+  targetDate?: string;
+  isArchive?: boolean;
 }
 
 function getRiskDetails(level: string, isWaterlogged: boolean) {
@@ -84,6 +86,8 @@ export default function Step1Assessment({
   kcCoefficient,
   weatherSeries,
   forecastDecades,
+  targetDate,
+  isArchive = false,
 }: Step1AssessmentProps) {
   const isWaterlogged =
     diagnosis.drought_risk_level.toUpperCase().includes("NADMIAR") ||
@@ -95,18 +99,23 @@ export default function Step1Assessment({
     diagnosis.critical_threshold_kbw_60d_mm ??
     getCriticalThresholdForSoil(diagnosis.soil_category);
 
+  // Odfiltrowujemy merytorycznie błędne zdanie z backendu (mały spadek nie jest przyczyną niedoboru wody)
+  const sanitizedCauses = diagnosis.primary_causes.filter(
+    (c) => !c.toLowerCase().includes("rowy nie wpływają na nawodnienie")
+  );
+
   const effectiveCauses =
     isWaterlogged &&
-    !diagnosis.primary_causes.some((c) =>
-      c.toLowerCase().includes("nadwyżka")
-    )
+    !sanitizedCauses.some((c) => c.toLowerCase().includes("nadwyżka"))
       ? [
           `Nadwyżka opadów nad parowaniem (KBW 30d: +${diagnosis.kbw_30d_mm.toFixed(1)} mm, KBW 60d: +${diagnosis.kbw_60d_mm.toFixed(1)} mm) przekracza pojemność wodną warstwy ornej (AWC: ${diagnosis.awc_mm.toFixed(1)} mm) — ryzyko zastoisk wodnych i niedotlenienia strefy korzeniowej.`,
-          ...diagnosis.primary_causes.filter(
+          ...sanitizedCauses.filter(
             (c) => !c.toLowerCase().includes("w granicach normy")
           ),
         ]
-      : diagnosis.primary_causes;
+      : sanitizedCauses.length > 0
+        ? sanitizedCauses
+        : ["Warunki wodne i wilgotnościowe w granicach normy."];
 
   const summaryBarData = [
     {
@@ -139,19 +148,47 @@ export default function Step1Assessment({
     return iso;
   };
 
-  const timeSeriesChartData = weatherSeries.map((pt) => ({
-    ...pt,
-    shortDate: formatDayMonth(pt.date), // DD.MM
-    typeLabel: pt.is_forecast ? "Prognoza (60 dni)" : "Historia (60 dni)",
-  }));
+  const timeSeriesChartData = weatherSeries.map((pt) => {
+    const kind =
+      pt.forecast_kind ||
+      (!pt.is_forecast
+        ? "historical"
+        : isArchive
+          ? "ex_post"
+          : "climatology");
+    const typeLabel =
+      kind === "historical"
+        ? "Historia (Open-Meteo)"
+        : kind === "synoptic_16d"
+          ? "Prognoza synoptyczna (16 dni, Open-Meteo)"
+          : kind === "ex_post"
+            ? "Przebieg po badanej dacie (weryfikacja ex-post)"
+            : "Scenariusz klimatologiczny (dni +17..+60)";
+    return {
+      ...pt,
+      forecast_kind: kind,
+      shortDate: formatDayMonth(pt.date), // DD.MM
+      typeLabel,
+    };
+  });
 
-  const lastHistoricalPoint = weatherSeries
+  const lastHistoricalPoint = timeSeriesChartData
     .filter((p) => !p.is_forecast)
     .slice(-1)[0];
 
-  const forecastPoints = weatherSeries.filter((p) => p.is_forecast);
+  const forecastPoints = timeSeriesChartData.filter((p) => p.is_forecast);
+  const synopticPoints = forecastPoints.filter(
+    (p) => p.forecast_kind === "synoptic_16d"
+  );
+  const climatologyPoints = forecastPoints.filter(
+    (p) => p.forecast_kind === "climatology"
+  );
   const firstForecastPoint = forecastPoints[0];
   const lastForecastPoint = forecastPoints[forecastPoints.length - 1];
+  const firstSynopticPoint = synopticPoints[0];
+  const lastSynopticPoint = synopticPoints[synopticPoints.length - 1];
+  const firstClimatologyPoint = climatologyPoints[0];
+  const lastClimatologyPoint = climatologyPoints[climatologyPoints.length - 1];
   const forecast60dPrecipSum =
     diagnosis.forecast_60d_precip_mm != null
       ? diagnosis.forecast_60d_precip_mm
@@ -290,7 +327,9 @@ export default function Step1Assessment({
                 </tr>
                 <tr className="bg-gov-surface">
                   <td className="font-bold text-gov-navy">
-                    Prognoza długoterminowa na 60 dni (6 dekad)
+                    {isArchive
+                      ? "Weryfikacja ex-post (+60 dni po badanej dacie)"
+                      : "Horyzont +60 dni (prognoza 16d + scenariusz klimatologiczny)"}
                   </td>
                   <td className="text-right font-mono font-bold text-gov-blue">
                     opad 60d: +{forecast60dPrecipSum.toFixed(1)} mm
@@ -365,17 +404,32 @@ export default function Step1Assessment({
         </div>
       </div>
 
-      {/* 1.2 Przebieg bilansu w czasie: historia + 60 dni prognozy długoterminowej */}
+      {/* 1.2 Przebieg bilansu w czasie: historia + 60 dni prognozy / weryfikacji ex-post */}
       <div className="space-y-3 pt-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="text-base font-bold text-gov-navy">
-            1.2. Długoterminowy przebieg i prognoza bilansu wodnego (+60 dni / 6
-            dekad w przód)
+            {isArchive
+              ? `1.2. Przebieg bilansu wodnego do dnia ${targetDate || "badania"} i weryfikacja ex-post (+60 dni)`
+              : "1.2. Przebieg bilansu wodnego: Historia → Prognoza 16 dni → Scenariusz klimatologiczny"}
           </h3>
           <div className="flex flex-wrap items-center gap-4 text-xs text-gov-secondary">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block w-3 h-3 bg-[#0052A5]" />
-              <span>Opady dobowe [mm]</span>
+              <span>Opady historyczne [mm]</span>
+            </span>
+            {!isArchive && synopticPoints.length > 0 && (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 bg-[#0284C7]" />
+                <span>Prognoza synoptyczna (16 dni)</span>
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 bg-[#94A3B8]" />
+              <span>
+                {isArchive
+                  ? "Przebieg ex-post (+60 dni)"
+                  : "Scenariusz klimatologiczny (+17..+60 dni)"}
+              </span>
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block w-4 h-0.5 bg-[#C81E1E]" />
@@ -388,10 +442,27 @@ export default function Step1Assessment({
           </div>
         </div>
         <p className="text-sm text-gov-secondary leading-relaxed">
-          Wykres prezentuje dotychczasowy przebieg bilansu wodnego (lewa strona)
-          oraz <strong>60-dniową prognozę długoterminową</strong> (zacieniowana
-          strefa po prawej stronie) uwzględniającą zmieniający się współczynnik
-          zapotrzebowania wodnego uprawy (Kc) w kolejnych dwóch miesiącach.
+          {isArchive ? (
+            <>
+              Analiza dotyczy daty historycznej (
+              <strong className="font-mono">{targetDate}</strong>). Lewa część
+              wykresu przedstawia bilans wodny do badanego dnia, natomiast
+              zacieniowana strefa po prawej stronie stanowi wyłącznie{" "}
+              <strong>
+                historyczny przebieg po badanej dacie (weryfikacja ex-post)
+              </strong>{" "}
+              i nie jest prognozą pogody.
+            </>
+          ) : (
+            <>
+              Wykres rozróżnia trzy strefy: <strong>Historię (Open-Meteo)</strong>{" "}
+              po lewej stronie, <strong>Prognozę synoptyczną (dni +1..+16)</strong>{" "}
+              w strefie niebieskiej oraz{" "}
+              <strong>Scenariusz klimatologiczny (dni +17..+60)</strong> w
+              strefie szarej (oparty o sezonowe normy opadowo-parowaniowe i
+              zmieniający się współczynnik uprawy Kc).
+            </>
+          )}
         </p>
 
         <div className="border border-gov-border p-4 bg-white">
@@ -399,7 +470,7 @@ export default function Step1Assessment({
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={timeSeriesChartData}
-                margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
+                margin={{ top: 24, right: 20, left: 0, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="2 2" stroke="#D2D6DC" />
                 <XAxis
@@ -439,11 +510,7 @@ export default function Step1Assessment({
                   labelFormatter={(label, payload) => {
                     const item = payload?.[0]?.payload;
                     if (!item) return `Data: ${label}`;
-                    return `${item.date} — ${
-                      item.is_forecast
-                        ? "PROGNOZA DŁUGOTERMINOWA (60 dni)"
-                        : "Pomiar historyczny"
-                    } (ET0: ${item.et0_mm} mm)`;
+                    return `${item.date} — ${item.typeLabel} (ET0: ${item.et0_mm} mm)`;
                   }}
                   contentStyle={{
                     borderRadius: "2px",
@@ -471,25 +538,69 @@ export default function Step1Assessment({
                     fontWeight: 700,
                   }}
                 />
-                {firstForecastPoint && lastForecastPoint && (
-                  <ReferenceArea
-                    yAxisId="kbw"
-                    x1={formatDayMonth(firstForecastPoint.date)}
-                    x2={formatDayMonth(lastForecastPoint.date)}
-                    fill="#0052A5"
-                    fillOpacity={0.07}
-                  />
+                {isArchive ? (
+                  firstForecastPoint &&
+                  lastForecastPoint && (
+                    <ReferenceArea
+                      yAxisId="kbw"
+                      x1={firstForecastPoint.shortDate}
+                      x2={lastForecastPoint.shortDate}
+                      fill="#64748B"
+                      fillOpacity={0.1}
+                    />
+                  )
+                ) : (
+                  <>
+                    {firstSynopticPoint && lastSynopticPoint && (
+                      <ReferenceArea
+                        yAxisId="kbw"
+                        x1={firstSynopticPoint.shortDate}
+                        x2={lastSynopticPoint.shortDate}
+                        fill="#0284C7"
+                        fillOpacity={0.11}
+                      />
+                    )}
+                    {firstClimatologyPoint && lastClimatologyPoint && (
+                      <ReferenceArea
+                        yAxisId="kbw"
+                        x1={firstClimatologyPoint.shortDate}
+                        x2={lastClimatologyPoint.shortDate}
+                        fill="#94A3B8"
+                        fillOpacity={0.12}
+                      />
+                    )}
+                    {lastSynopticPoint && firstClimatologyPoint && (
+                      <ReferenceLine
+                        yAxisId="kbw"
+                        x={lastSynopticPoint.shortDate}
+                        stroke="#64748B"
+                        strokeWidth={1.5}
+                        strokeDasharray="3 3"
+                        label={{
+                          value: "Scenariusz klimatologiczny →",
+                          position: "insideTopRight",
+                          fill: "#475569",
+                          fontSize: 10,
+                          fontWeight: 600,
+                        }}
+                      />
+                    )}
+                  </>
                 )}
                 {lastHistoricalPoint && (
                   <ReferenceLine
                     yAxisId="kbw"
-                    x={formatDayMonth(lastHistoricalPoint.date)}
+                    x={lastHistoricalPoint.shortDate}
                     stroke="#0B2240"
                     strokeWidth={2}
                     strokeDasharray="4 3"
                     label={{
-                      value: "Prognoza 60 dni (6 dekad) →",
-                      position: "insideTopRight",
+                      value: isArchive
+                        ? "Weryfikacja ex-post (+60d) →"
+                        : synopticPoints.length > 0
+                          ? "Prognoza 16d →"
+                          : "Scenariusz +60d →",
+                      position: "top",
                       fill: "#0B2240",
                       fontSize: 11,
                       fontWeight: 700,
@@ -504,7 +615,13 @@ export default function Step1Assessment({
                   {timeSeriesChartData.map((entry, idx) => (
                     <Cell
                       key={`pcell-${idx}`}
-                      fill={entry.is_forecast ? "#0284C7" : "#0052A5"}
+                      fill={
+                        entry.forecast_kind === "historical"
+                          ? "#0052A5"
+                          : entry.forecast_kind === "synoptic_16d"
+                            ? "#0284C7"
+                            : "#94A3B8"
+                      }
                     />
                   ))}
                 </Bar>
@@ -533,7 +650,7 @@ export default function Step1Assessment({
               <th>Badany wskaźnik</th>
               <th>Znaczenie dla uprawy</th>
               <th className="text-right">Stan obecny</th>
-              <th className="text-right">Norma wieloletnia</th>
+              <th className="text-right">Norma referencyjna uprawy (faza)</th>
               <th className="text-right">Odchylenie</th>
             </tr>
           </thead>
@@ -630,12 +747,21 @@ export default function Step1Assessment({
             <tr>
               <td className="font-bold">Średni spadek terenu</td>
               <td className="font-mono font-bold">
-                {diagnosis.slope_percent.toFixed(1)}%
+                {diagnosis.slope_percent != null
+                  ? `${diagnosis.slope_percent.toFixed(1)}%`
+                  : "Brak danych"}
+                {diagnosis.aspect_direction && (
+                  <span className="block font-sans text-xs font-normal text-gov-secondary">
+                    spływ: {diagnosis.aspect_direction}
+                  </span>
+                )}
               </td>
               <td className="text-gov-secondary">
-                {diagnosis.slope_percent >= 3
-                  ? "Podwyższone ryzyko spływu powierzchniowego wody po stoku podczas ulew."
-                  : "Niewielki spadek terenu sprzyja wsiąkaniu wody opadowej."}
+                {diagnosis.slope_percent == null
+                  ? "Brak danych wysokościowych DEM dla oceny nachylenia stoku."
+                  : diagnosis.slope_percent >= 3
+                    ? "Podwyższone ryzyko spływu powierzchniowego wody po stoku podczas ulew."
+                    : "Niewielki spadek terenu sprzyja wsiąkaniu wody opadowej."}
               </td>
             </tr>
             <tr>
@@ -646,6 +772,11 @@ export default function Step1Assessment({
                 {diagnosis.distance_to_ditch_m != null
                   ? `${Math.round(diagnosis.distance_to_ditch_m)} m`
                   : "Brak w buforze 500 m"}
+                {diagnosis.nearest_waterway_type && (
+                  <span className="block font-sans text-xs font-normal text-gov-secondary">
+                    typ: {diagnosis.nearest_waterway_type}
+                  </span>
+                )}
               </td>
               <td className="text-gov-secondary">
                 {diagnosis.distance_to_ditch_m != null
@@ -673,6 +804,58 @@ export default function Step1Assessment({
                   {diagnosis.river_distance_m != null
                     ? `Stacja wodowskazowa IMGW w odległości ${(diagnosis.river_distance_m / 1000).toFixed(1)} km od działki.`
                     : "Lokalna sieć zlewniowa IMGW-PIB."}
+                </td>
+              </tr>
+            )}
+            {(diagnosis.has_wetland_or_pond_nearby != null ||
+              diagnosis.has_windbreak_nearby != null) && (
+              <tr>
+                <td className="font-bold">
+                  Elementy krajobrazowe i retencja naturalna (OSM)
+                </td>
+                <td className="text-xs font-semibold space-y-1">
+                  {diagnosis.has_wetland_or_pond_nearby != null && (
+                    <div>
+                      Oczka / mokradła (500 m):{" "}
+                      <span
+                        className={
+                          diagnosis.has_wetland_or_pond_nearby
+                            ? "text-gov-success font-bold"
+                            : "text-gov-secondary"
+                        }
+                      >
+                        {diagnosis.has_wetland_or_pond_nearby
+                          ? "wykryto"
+                          : "brak"}
+                      </span>
+                    </div>
+                  )}
+                  {diagnosis.has_windbreak_nearby != null && (
+                    <div>
+                      Zadrzewienia / żywopłoty (300 m):{" "}
+                      <span
+                        className={
+                          diagnosis.has_windbreak_nearby
+                            ? "text-gov-success font-bold"
+                            : "text-gov-warning font-bold"
+                        }
+                      >
+                        {diagnosis.has_windbreak_nearby
+                          ? "wykryto"
+                          : "brak"}
+                      </span>
+                    </div>
+                  )}
+                </td>
+                <td className="text-gov-secondary">
+                  {diagnosis.has_wetland_or_pond_nearby
+                    ? "Oczka wodne i mokradła w otoczeniu stabilizują lokalny bilans wodny — warto chronić ich strefę buforową. "
+                    : ""}
+                  {diagnosis.has_windbreak_nearby === false
+                    ? "Brak zadrzewień śródpolnych w promieniu 300 m zwiększa parowanie powodowane przez wiatr."
+                    : diagnosis.has_windbreak_nearby === true
+                      ? "Obecność zadrzewień śródpolnych ogranicza wiatr i parowanie z pola."
+                      : ""}
                 </td>
               </tr>
             )}

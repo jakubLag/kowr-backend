@@ -1,12 +1,14 @@
 "use client";
 
-import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LandUseCheckResult,
   LocationSuggestion,
   ParcelSearchResponse,
+  StoredRecentParcel,
 } from "@/types/analysis";
 import {
   ApiError,
@@ -73,9 +75,21 @@ function Step1ParcelSearchContent() {
   const [landUseCheck, setLandUseCheck] = useState<LandUseCheckResult | null>(
     null
   );
-  const [recentParcels, setRecentParcels] = useState<ParcelSearchResponse[]>(
+  const [recentParcels, setRecentParcels] = useState<StoredRecentParcel[]>(
     []
   );
+
+  const sortedRecentParcels = useMemo(() => {
+    const getRiskRank = (item: StoredRecentParcel): number => {
+      const level = item.lastAnalysis?.riskLevel?.toUpperCase() || "";
+      if (level.includes("WYSOK") || level === "HIGH") return 0;
+      if (level.includes("UMIARK") || level === "MEDIUM") return 1;
+      if (level.includes("NADMIAR")) return 2;
+      if (level.includes("NISK") || level === "LOW") return 3;
+      return 4;
+    };
+    return [...recentParcels].sort((a, b) => getRiskRank(a) - getRiskRank(b));
+  }, [recentParcels]);
 
   useEffect(() => {
     setRecentParcels(getRecentParcels());
@@ -624,15 +638,15 @@ function Step1ParcelSearchContent() {
               </div>
             )}
 
-            {/* Moje Gospodarstwo — Ostatnio wybierane działki */}
-            {recentParcels.length > 0 && (
+            {/* Moje Gospodarstwo — Ostatnio wybierane działki (mini-ranking ryzyka) */}
+            {sortedRecentParcels.length > 0 && (
               <div className="pt-4 border-t border-gov-border space-y-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <h2 className="text-sm font-bold text-gov-navy">
                     Moje gospodarstwo — ostatnio wybierane działki
                   </h2>
                   <span className="text-xs text-gov-secondary">
-                    Szybkie przełączanie
+                    Priorytet wg ostatniej oceny ryzyka
                   </span>
                 </div>
 
@@ -640,13 +654,25 @@ function Step1ParcelSearchContent() {
                   <thead>
                     <tr>
                       <th>TERYT / Gmina</th>
-                      <th className="text-right">Powierzchnia</th>
+                      <th className="text-right">Pow.</th>
+                      <th>Ostatnia ocena ryzyka</th>
                       <th className="text-right">Akcja</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {recentParcels.map((item) => {
+                    {sortedRecentParcels.map((item) => {
                       const isCurrent = parcel?.teryt === item.teryt;
+                      const last = item.lastAnalysis;
+                      const normLevel = last?.riskLevel?.toUpperCase() || "";
+                      const riskBadgeClass =
+                        normLevel.includes("WYSOK") || normLevel === "HIGH"
+                          ? "bg-gov-danger-bg text-gov-danger border-gov-danger/30"
+                          : normLevel.includes("UMIARK") ||
+                              normLevel === "MEDIUM" ||
+                              normLevel.includes("NADMIAR")
+                            ? "bg-gov-warning-bg text-gov-warning border-gov-warning/30"
+                            : "bg-gov-success-bg text-gov-success border-gov-success/30";
+
                       return (
                         <tr
                           key={item.teryt}
@@ -663,10 +689,45 @@ function Step1ParcelSearchContent() {
                               {item.precinct || "—"}
                             </div>
                           </td>
-                          <td className="text-right font-mono font-semibold">
+                          <td className="text-right font-mono font-semibold whitespace-nowrap">
                             {item.area_ha} ha
                           </td>
+                          <td>
+                            {last ? (
+                              <div className="space-y-0.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span
+                                    className={`inline-block px-1.5 py-0.5 text-[10px] font-bold border rounded-[2px] ${riskBadgeClass}`}
+                                  >
+                                    {normLevel.includes("NADMIAR")
+                                      ? "NADMIAR WODY"
+                                      : last.riskLevel}
+                                  </span>
+                                  <span className="font-mono text-[11px] font-semibold text-gov-navy">
+                                    {last.kbw30dMm > 0 ? "+" : ""}
+                                    {last.kbw30dMm.toFixed(0)} mm
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-gov-secondary">
+                                  {last.cropLabel} • {last.targetDate}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-gov-muted">
+                                Nie analizowano
+                              </span>
+                            )}
+                          </td>
                           <td className="text-right whitespace-nowrap space-x-2">
+                            {last && (
+                              <Link
+                                href={`/raport?teryt=${encodeURIComponent(item.teryt)}&crop=${encodeURIComponent(last.crop)}&date=${encodeURIComponent(last.targetDate)}`}
+                                className="text-gov-success hover:underline font-semibold"
+                                title="Otwórz ostatni raport"
+                              >
+                                Raport
+                              </Link>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleSelectRecentParcel(item)}

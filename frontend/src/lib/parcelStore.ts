@@ -1,4 +1,8 @@
-import { ParcelSearchResponse } from "@/types/analysis";
+import {
+  ParcelLastAnalysis,
+  ParcelSearchResponse,
+  StoredRecentParcel,
+} from "@/types/analysis";
 
 const PARCEL_STORAGE_KEY = "kowr_selected_parcel_v1";
 const RECENT_PARCELS_KEY = "kowr_recent_parcels_v1";
@@ -31,7 +35,7 @@ export function getStoredParcel(
   }
 }
 
-export function getRecentParcels(): ParcelSearchResponse[] {
+export function getRecentParcels(): StoredRecentParcel[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(RECENT_PARCELS_KEY);
@@ -46,10 +50,33 @@ export function getRecentParcels(): ParcelSearchResponse[] {
 export function addRecentParcel(parcel: ParcelSearchResponse): void {
   if (typeof window === "undefined" || !parcel?.teryt) return;
   try {
-    const existing = getRecentParcels().filter(
-      (item) => item.teryt !== parcel.teryt
-    );
-    const updated = [parcel, ...existing].slice(0, MAX_RECENT_PARCELS);
+    const current = getRecentParcels();
+    const existingEntry = current.find((item) => item.teryt === parcel.teryt);
+    const others = current.filter((item) => item.teryt !== parcel.teryt);
+    const merged: StoredRecentParcel = {
+      ...parcel,
+      lastAnalysis: existingEntry?.lastAnalysis,
+    };
+    const updated = [merged, ...others].slice(0, MAX_RECENT_PARCELS);
+    localStorage.setItem(RECENT_PARCELS_KEY, JSON.stringify(updated));
+  } catch {
+    // ignore
+  }
+}
+
+export function updateRecentParcelAnalysis(
+  parcel: ParcelSearchResponse,
+  lastAnalysis: ParcelLastAnalysis
+): void {
+  if (typeof window === "undefined" || !parcel?.teryt) return;
+  try {
+    const current = getRecentParcels();
+    const others = current.filter((item) => item.teryt !== parcel.teryt);
+    const merged: StoredRecentParcel = {
+      ...parcel,
+      lastAnalysis,
+    };
+    const updated = [merged, ...others].slice(0, MAX_RECENT_PARCELS);
     localStorage.setItem(RECENT_PARCELS_KEY, JSON.stringify(updated));
   } catch {
     // ignore

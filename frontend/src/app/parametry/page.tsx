@@ -12,15 +12,16 @@ import {
 } from "@/lib/crops";
 import { fetchSupportedCrops, searchParcelByTeryt } from "@/lib/api";
 import { getStoredParcel, saveStoredParcel } from "@/lib/parcelStore";
+import { getTodayIsoString } from "@/lib/retentionSimulator";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 
-function getTodayIsoString(): string {
+function getMinAllowedDateIso(): string {
   const now = new Date();
-  const year = now.getFullYear();
+  const minYear = now.getFullYear() - 10;
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return `${minYear}-${month}-${day}`;
 }
 
 function Step2ParametersContent() {
@@ -31,6 +32,7 @@ function Step2ParametersContent() {
   const initialDateParam = searchParams.get("date");
 
   const todayIso = useMemo(() => getTodayIsoString(), []);
+  const minAllowedDateIso = useMemo(() => getMinAllowedDateIso(), []);
 
   const [parcel, setParcel] = useState<ParcelSearchResponse | null>(null);
   const [isLoadingParcel, setIsLoadingParcel] = useState<boolean>(true);
@@ -69,6 +71,7 @@ function Step2ParametersContent() {
             criticalPhase:
               localMatch?.criticalPhase ||
               "Okres intensywnego wzrostu i zawiązywania plonu",
+            kc_by_month: localMatch?.kc_by_month || CROP_OPTIONS[0].kc_by_month,
           };
         });
         setCrops(merged);
@@ -119,13 +122,24 @@ function Step2ParametersContent() {
   );
 
   const stageDescription = useMemo(
-    () => getMonthGrowthStageDescription(selectedMonth),
-    [selectedMonth]
+    () => getMonthGrowthStageDescription(selectedMonth, selectedCrop),
+    [selectedMonth, selectedCrop]
   );
+
+  const dateValidationError = useMemo(() => {
+    if (dateMode !== "custom") return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(customDate)) {
+      return "Podaj poprawną datę w formacie RRRR-MM-DD.";
+    }
+    if (customDate < minAllowedDateIso || customDate > todayIso) {
+      return `Data analizy musi mieścić się w przedziale ostatnich 10 lat (${minAllowedDateIso} – ${todayIso}).`;
+    }
+    return null;
+  }, [dateMode, customDate, minAllowedDateIso, todayIso]);
 
   const handleSubmitAnalysis = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!parcel) return;
+    if (!parcel || dateValidationError) return;
     router.push(
       `/raport?teryt=${encodeURIComponent(parcel.teryt)}&crop=${encodeURIComponent(selectedCrop)}&date=${encodeURIComponent(effectiveDate)}`
     );
@@ -358,7 +372,7 @@ function Step2ParametersContent() {
               </div>
 
               {dateMode === "custom" && (
-                <div className="pt-2">
+                <div className="pt-2 space-y-2">
                   <label htmlFor="analysis-date" className="gov-label">
                     Wskaż datę analizy (RRRR-MM-DD)
                   </label>
@@ -366,11 +380,21 @@ function Step2ParametersContent() {
                     id="analysis-date"
                     type="date"
                     value={customDate}
-                    min="2016-01-01"
-                    max="2026-12-31"
+                    min={minAllowedDateIso}
+                    max={todayIso}
+                    aria-invalid={Boolean(dateValidationError)}
                     onChange={(e) => setCustomDate(e.target.value)}
-                    className="gov-input font-mono font-bold sm:w-60 mt-1"
+                    className={`gov-input font-mono font-bold sm:w-60 mt-1 ${
+                      dateValidationError
+                        ? "border-gov-danger focus:border-gov-danger"
+                        : ""
+                    }`}
                   />
+                  {dateValidationError && (
+                    <div role="alert" className="gov-callout-danger text-xs">
+                      {dateValidationError}
+                    </div>
+                  )}
                 </div>
               )}
             </fieldset>
@@ -416,7 +440,7 @@ function Step2ParametersContent() {
 
               <button
                 type="submit"
-                disabled={!parcel}
+                disabled={!parcel || Boolean(dateValidationError)}
                 className="gov-btn-primary px-7 py-3 text-base"
               >
                 Analizuj sytuację wodną

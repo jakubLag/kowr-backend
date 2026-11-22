@@ -103,4 +103,17 @@
     break-inside: avoid;
     page-break-inside: avoid;
   }
+
+  table {
+    page-break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }

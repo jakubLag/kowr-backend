@@ -2,6 +2,10 @@
 
 import React from "react";
 import { Diagnosis, RetentionAction } from "@/types/analysis";
+import {
+  adaptRetentionRecommendations,
+  RETENTION_ENRICHMENT_BY_ID,
+} from "@/lib/reportHelpers";
 
 interface Step2RetentionProps {
   recommendations: RetentionAction[];
@@ -12,63 +16,10 @@ export default function Step2Retention({
   recommendations,
   diagnosis,
 }: Step2RetentionProps) {
-  const isWaterlogged =
-    diagnosis != null &&
-    (diagnosis.drought_risk_level.toUpperCase().includes("NADMIAR") ||
-      diagnosis.kbw_30d_mm > Math.max(35, diagnosis.awc_mm * 0.85) ||
-      diagnosis.kbw_60d_mm > Math.max(60, diagnosis.awc_mm * 1.4));
-
-  const adaptedRecommendations: RetentionAction[] = React.useMemo(() => {
-    if (!isWaterlogged || !diagnosis) return recommendations;
-
-    // Jeśli backend przysłał już nowe reguły drenażowe, używamy ich bezpośrednio
-    if (
-      recommendations.some(
-        (r) =>
-          r.id === "DRAINAGE_DITCH_OPEN_WEIR" ||
-          r.id === "SOIL_WATERLOGGING_SUBSOILING"
-      )
-    ) {
-      return recommendations;
-    }
-
-    const list: RetentionAction[] = [];
-    if (
-      diagnosis.distance_to_ditch_m != null &&
-      diagnosis.distance_to_ditch_m <= 300
-    ) {
-      list.push({
-        id: "DRAINAGE_DITCH_OPEN_WEIR",
-        title:
-          "Regulacja odpływu na rowie melioracyjnym (odprowadzenie nadmiaru wody zastoiskowej)",
-        badge: "Melioracja dwukierunkowa (Priorytet 1)",
-        why: `Na działce występuje znaczna nadwyżka wody (KBW 30d: +${diagnosis.kbw_30d_mm.toFixed(1)} mm) przekraczająca pojemność gleby (AWC: ${diagnosis.awc_mm.toFixed(1)} mm), a w odległości ${Math.round(diagnosis.distance_to_ditch_m)} m znajduje się rów melioracyjny.`,
-        action:
-          "Otwórz zastawkę piętrzącą i udrożnij przepusty na rowie melioracyjnym do czasu zejścia wody zastoiskowej, a po ustabilizowaniu wilgotności ponownie zamknij zastawkę, aby zachować rezerwę na okres wiosenno-letni.",
-        priority: 1,
-        category: "landscape",
-      });
-    }
-
-    list.push({
-      id: "SOIL_WATERLOGGING_SUBSOILING",
-      title:
-        "Głęboszowanie przełamujące podeszwę płużną i ochrona mokrej gleby przed ugniataniem",
-      badge: "Napowietrzenie profilu glebowego (Priorytet 1)",
-      why: `Nadmiar opadów (+${diagnosis.kbw_30d_mm.toFixed(1)} mm) wypełnił pory powietrzne w warstwie ornej (AWC: ${diagnosis.awc_mm.toFixed(1)} mm), co grozi niedotlenieniem i gniciem korzeni.`,
-      action:
-        "Wstrzymaj wjazd ciężkim sprzętem na przelaną glebę (aby nie zniszczyć jej struktury), a po obeschnięciu wykonaj głęboszowanie (35–45 cm) ułatwiające przesiąkanie nadmiaru wody do głębszych warstw.",
-      priority: 1,
-      category: "soil",
-    });
-
-    for (const rec of recommendations) {
-      if (rec.id !== "RETENTION_DITCH_WEIR") {
-        list.push(rec);
-      }
-    }
-    return list;
-  }, [isWaterlogged, diagnosis, recommendations]);
+  const adaptedRecommendations: RetentionAction[] = React.useMemo(
+    () => adaptRetentionRecommendations(recommendations, diagnosis),
+    [diagnosis, recommendations]
+  );
   return (
     <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:break-inside-avoid">
       <div>
@@ -92,53 +43,91 @@ export default function Step2Retention({
       </div>
 
       <div className="border border-gov-border divide-y divide-gov-border bg-white">
-        {adaptedRecommendations.map((rec, index) => (
-          <div key={rec.id} className="p-5 sm:p-6 space-y-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 pb-3 border-b border-gov-border">
-              <h3 className="text-base sm:text-lg font-bold text-gov-navy">
-                {index + 1}. {rec.title}
-              </h3>
-              <span className="text-xs font-bold text-gov-success bg-gov-success-bg border border-gov-border px-2.5 py-1 rounded-[2px]">
-                {rec.badge}
-              </span>
-            </div>
+        {adaptedRecommendations.map((rec, index) => {
+          const fallback = RETENTION_ENRICHMENT_BY_ID[rec.id];
+          const waterGainMm = rec.water_gain_mm ?? fallback?.water_gain_mm;
+          const bufferDays =
+            rec.drought_buffer_days ?? fallback?.drought_buffer_days;
+          const ecoschemeName = rec.ecoscheme_name ?? fallback?.ecoscheme_name;
+          const ecoschemeCode = rec.ecoscheme_code ?? fallback?.ecoscheme_code;
+          const ecoschemePln =
+            rec.ecoscheme_pln_per_ha ?? fallback?.ecoscheme_pln_per_ha;
 
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-5 text-sm">
-              <div className="md:col-span-6 space-y-1">
-                <div className="text-xs font-bold text-gov-secondary">
-                  Dlaczego zalecamy na tej działce (diagnoza)
+          return (
+            <div key={rec.id} className="p-5 sm:p-6 space-y-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 pb-3 border-b border-gov-border">
+                <h3 className="text-base sm:text-lg font-bold text-gov-navy">
+                  {index + 1}. {rec.title}
+                </h3>
+                <span className="text-xs font-bold text-gov-success bg-gov-success-bg border border-gov-border px-2.5 py-1 rounded-[2px]">
+                  {rec.badge}
+                </span>
+              </div>
+
+              {(waterGainMm != null || bufferDays != null) && (
+                <div className="flex flex-wrap items-center gap-2 text-xs tabular-nums">
+                  {waterGainMm != null && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-gov-blue-light border border-gov-blue/25 text-gov-navy font-bold rounded-[2px]">
+                      Szacowany zysk retencji:{" "}
+                      <span className="font-mono text-gov-blue">
+                        +{waterGainMm} mm
+                      </span>{" "}
+                      ({waterGainMm * 10} m³/ha)
+                    </span>
+                  )}
+                  {bufferDays != null && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-gov-success-bg border border-gov-success/25 text-gov-navy font-bold rounded-[2px]">
+                      Bufor suszowy:{" "}
+                      <span className="font-mono text-gov-success">
+                        +{bufferDays} dni
+                      </span>{" "}
+                      bez stresu wodnego
+                    </span>
+                  )}
                 </div>
-                <p className="text-gov-text leading-relaxed">{rec.why}</p>
-              </div>
+              )}
 
-              <div className="md:col-span-6 md:border-l md:border-gov-border md:pl-5 space-y-1">
-                <div className="text-xs font-bold text-gov-navy">
-                  Co konkretnie zrobić na polu (działanie)
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-5 text-sm">
+                <div className="md:col-span-6 space-y-1">
+                  <div className="text-xs font-bold text-gov-secondary">
+                    Dlaczego zalecamy na tej działce (diagnoza)
+                  </div>
+                  <p className="text-gov-text leading-relaxed">{rec.why}</p>
                 </div>
-                <p className="text-gov-text font-medium leading-relaxed">
-                  {rec.action}
-                </p>
-              </div>
-            </div>
 
-            {(rec.water_gain_mm || rec.ecoscheme_name) && (
-              <div className="pt-3 border-t border-gov-border/60 flex flex-wrap items-center gap-3 text-xs">
-                {rec.water_gain_mm && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-900 border border-blue-200 rounded font-semibold">
-                    💧 Zysk retencji glebowej: +{rec.water_gain_mm} mm
-                    {rec.drought_buffer_days && ` (+${rec.drought_buffer_days} dni bufora suszy)`}
-                  </span>
-                )}
-                {rec.ecoscheme_name && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded font-semibold">
-                    💰 Dofinansowanie ARiMR: {rec.ecoscheme_name}
-                    {rec.ecoscheme_pln_per_ha && ` (${rec.ecoscheme_pln_per_ha} zł/ha)`}
-                  </span>
-                )}
+                <div className="md:col-span-6 md:border-l md:border-gov-border md:pl-5 space-y-1">
+                  <div className="text-xs font-bold text-gov-navy">
+                    Co konkretnie zrobić na polu (działanie)
+                  </div>
+                  <p className="text-gov-text font-medium leading-relaxed">
+                    {rec.action}
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
-        ))}
+
+              {ecoschemeName && (
+                <div className="pt-3 border-t border-gov-border/70 flex flex-wrap items-center justify-between gap-2 text-xs bg-gov-surface/70 px-3 py-2 rounded-[2px]">
+                  <div className="text-gov-text">
+                    <span className="font-bold text-gov-navy">
+                      Możliwe wsparcie ARiMR / WPR:
+                    </span>{" "}
+                    {ecoschemeName}
+                    {ecoschemeCode && (
+                      <span className="ml-1.5 font-mono text-[11px] text-gov-secondary">
+                        ({ecoschemeCode})
+                      </span>
+                    )}
+                  </div>
+                  {ecoschemePln != null && (
+                    <span className="font-mono font-bold text-gov-success whitespace-nowrap">
+                      orientacyjnie ~{ecoschemePln} PLN/ha
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
