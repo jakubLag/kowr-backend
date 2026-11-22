@@ -120,6 +120,23 @@ export default function Step2Retention({
                 </p>
               </div>
             </div>
+
+            {(rec.water_gain_mm || rec.ecoscheme_name) && (
+              <div className="pt-3 border-t border-gov-border/60 flex flex-wrap items-center gap-3 text-xs">
+                {rec.water_gain_mm && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-900 border border-blue-200 rounded font-semibold">
+                    💧 Zysk retencji glebowej: +{rec.water_gain_mm} mm
+                    {rec.drought_buffer_days && ` (+${rec.drought_buffer_days} dni bufora suszy)`}
+                  </span>
+                )}
+                {rec.ecoscheme_name && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded font-semibold">
+                    💰 Dofinansowanie ARiMR: {rec.ecoscheme_name}
+                    {rec.ecoscheme_pln_per_ha && ` (${rec.ecoscheme_pln_per_ha} zł/ha)`}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

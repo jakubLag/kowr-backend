@@ -85,6 +85,10 @@ def run_tests():
     meta = analysis["metadata"]
     print(f"• Czas obliczeń: {meta['execution_time_ms']} ms")
     print(f"• Liczba źródeł: {len(meta['sources'])}")
+    if meta.get("limitations"):
+        print("• Jawne ograniczenia i status danych (zero pozornej precyzji):")
+        for lim in meta["limitations"]:
+            print(f"   - {lim}")
 
     print("\n" + "=" * 60)
     print(" ✅ Wszystkie testy API przeszły pomyślnie!")

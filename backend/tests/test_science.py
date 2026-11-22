@@ -92,6 +92,6 @@ def test_decision_engine_low_slope_ditch():
         area_ha=3.0
     )
     causes_text = " ".join(result["primary_causes"])
-    assert "rowy nie wpływają na nawodnienie" in causes_text
+    assert "sprzyja retencji krajobrazowej" in causes_text
 
 

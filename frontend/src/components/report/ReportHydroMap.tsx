@@ -163,6 +163,16 @@ export default function ReportHydroMap({
               </span>
             </span>
           )}
+          {diagnosis.nearest_river && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#0052A5]" />
+              <span>
+                Najbliższa rzeka IMGW: <strong>{diagnosis.nearest_river}</strong>
+                {diagnosis.river_distance_m != null && ` (${(diagnosis.river_distance_m / 1000).toFixed(1)} km)`}
+                {diagnosis.water_level_cm != null && ` • stan wody: ${diagnosis.water_level_cm} cm`}
+              </span>
+            </span>
+          )}
         </div>
         <span>Podkład: Ortofotomapa i KIEG GUGiK</span>
       </div>

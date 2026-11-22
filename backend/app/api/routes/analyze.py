@@ -1,6 +1,6 @@
 import time
 import asyncio
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter, HTTPException, status
 
 from app.models.schemas import (
@@ -9,10 +9,17 @@ from app.models.schemas import (
     DailyWeatherPoint,
     DecadeForecastPoint,
     Diagnosis,
-    ReportMetadata
+    ReportMetadata,
+    ClimateVulnerability10Y
 )
 from app.services.gis.uldk import fetch_parcel_from_uldk
-from app.services.gis.weather import fetch_weather_data
+from app.services.gis.weather import (
+    fetch_weather_data,
+    calculate_10y_vulnerability,
+    fetch_10y_climatology,
+    analyze_climatology_metrics,
+    MONTHLY_CLIMATE_NORMALS_PL,
+)
 from app.services.gis.satellite import fetch_sentinel_indices
 from app.services.gis.soil import fetch_soil_properties
 from app.services.gis.terrain import fetch_terrain_and_hydro
@@ -50,18 +57,20 @@ async def analyze_parcel(request: AnalyzeRequest):
     # Data analizy i współczynnik Kc
     if request.target_date:
         try:
-            target_dt = datetime.strptime(request.target_date, "%Y-%m-%d")
-            month = target_dt.month
+            target_date_converted = date.fromisoformat(request.target_date)
+            month = target_date_converted.month
         except ValueError:
-            month = 7
+            target_date_converted = date.today()
+            month = target_date_converted.month
     else:
-        month = datetime.now().month
+        target_date_converted = date.today()
+        month = target_date_converted.month
 
     kc = get_crop_kc(request.crop, month=month)
 
     # 2. Równoległe pobranie pozostałych 4 źródeł danych z return_exceptions=True (Graceful Degradation)
-    weather_task = fetch_weather_data(lat, lon, request.target_date)
-    sentinel_task = fetch_sentinel_indices(lat, lon, request.target_date, crop_name=request.crop)
+    weather_task = fetch_weather_data(lat, lon, target_date_str=target_date_converted.isoformat())
+    sentinel_task = fetch_sentinel_indices(lat, lon, target_date_converted.isoformat(), crop_name=request.crop)
     soil_task = fetch_soil_properties(lat, lon)
     terrain_task = fetch_terrain_and_hydro(lat, lon, ditch_distance_m=request.ditch_distance_m)
 
@@ -79,40 +88,81 @@ async def analyze_parcel(request: AnalyzeRequest):
     limitations = []
 
     # Bezpieczna obsługa pogody
-    if isinstance(weather_data, Exception) or not weather_data:
-        limitations.append("Ostrzeżenie: Usługa pogodowa Open-Meteo niedostępna. Użyto awaryjnego modelu meteorologicznego.")
+    if isinstance(weather_data, Exception) or not weather_data or not weather_data.get("raw_daily_series"):
+        if isinstance(weather_data, Exception) or not weather_data:
+            limitations.append("Meteorologia (Open-Meteo): Usługa chwilowo niedostępna – użyto referencyjnego modelu agrometeorologicznego.")
+        
+        fallback_series = []
+        for d_offset in range(-60, 61):
+            cur_d = target_date_converted + timedelta(days=d_offset)
+            m_num = cur_d.month
+            norm_val = MONTHLY_CLIMATE_NORMALS_PL.get(m_num, {"et0_daily": 2.5, "precip_monthly": 45.0, "temp": 15.0})
+            fallback_series.append({
+                "date": cur_d.isoformat(),
+                "precipitation_mm": round(norm_val["precip_monthly"] / 20.0, 1) if (d_offset % 4 == 0) else 0.0,
+                "et0_mm": norm_val["et0_daily"],
+                "temp_max_c": norm_val["temp"],
+                "wind_max_ms": 3.0,
+                "is_forecast": d_offset > 0,
+            })
+            
+        p_30 = sum(d["precipitation_mm"] for d in fallback_series[30:60])
+        p_60 = sum(d["precipitation_mm"] for d in fallback_series[:60])
+        e_30 = sum(d["et0_mm"] for d in fallback_series[30:60])
+        e_60 = sum(d["et0_mm"] for d in fallback_series[:60])
+
         weather_data = {
-            "precipitation_30d_mm": 35.0, "precipitation_60d_mm": 70.0,
-            "et0_30d_mm": 110.0, "et0_60d_mm": 210.0, "mean_temperature_c": 19.0,
+            "precipitation_30d_mm": round(p_30, 1),
+            "precipitation_60d_mm": round(p_60, 1),
+            "et0_30d_mm": round(e_30, 1),
+            "et0_60d_mm": round(e_60, 1),
+            "forecast_7d_precip_mm": round(sum(d["precipitation_mm"] for d in fallback_series[61:68]), 1),
+            "forecast_7d_et0_mm": round(sum(d["et0_mm"] for d in fallback_series[61:68]), 1),
+            "forecast_60d_precip_mm": round(sum(d["precipitation_mm"] for d in fallback_series[61:]), 1),
+            "forecast_60d_et0_mm": round(sum(d["et0_mm"] for d in fallback_series[61:]), 1),
+            "mean_temperature_c": 19.0,
+            "raw_daily_series": fallback_series,
             "is_fallback": True
         }
     elif weather_data.get("is_fallback"):
-        limitations.append("Wykorzystano zastępcze dane meteorologiczne z powodu problemów po stronie dostawcy.")
+        limitations.append("Meteorologia: Wykorzystano zastępczy model agroklimatyczny z powodu niedostępności dostawcy.")
 
-    # Bezpieczna obsługa satelity
+    # Bezpieczna obsługa satelity (Zero pozornej precyzji: brak sceny -> None)
     if isinstance(sentinel_data, Exception) or not sentinel_data:
-        limitations.append("Ostrzeżenie: Dane satelitarne Sentinel-2 chwilowo niedostępne. Wskaźniki NDVI/NDMI oszacowano historycznie.")
+        limitations.append("Teledetekcja Sentinel-2: Usługa STAC/CDSE niedostępna – brak możliwości wyliczenia NDVI/NDMI.")
         sentinel_data = {
-            "ndvi_current": 0.55, "ndvi_historical_median": 0.58, "ndvi_anomaly_percent": -5.0,
-            "ndmi_current": 0.20, "scene_date": "N/D", "cloud_cover_percent": 0.0,
-            "limitation_note": "Brak świeżej sceny satelitarnej (wysokie zachmurzenie lub awaria STAC)."
+            "ndvi_current": None, "ndvi_historical_median": None, "ndvi_anomaly_percent": None,
+            "ndmi_current": None, "scene_date": None, "cloud_cover_percent": None,
+            "is_fallback": True,
+            "limitation_note": "Brak danych satelitarnych Sentinel-2."
         }
     elif sentinel_data.get("limitation_note"):
         limitations.append(sentinel_data["limitation_note"])
 
-    # Bezpieczna obsługa gleby
-    if isinstance(soil_data, Exception) or not soil_data:
-        limitations.append("Ostrzeżenie: ISRIC SoilGrids niedostępne. Zastosowano domyślny profil gleby piaszczysto-gliniastej.")
-        soil_data = {
-            "soil_category": "średnia", "awc_mm": 120.0, "texture_name": "Gleba średnia (domyślna)"
-        }
+    # Bezpieczna obsługa gleby (Spójna skala AWC dla warstwy 0-30 cm: 30.9 mm)
+    if isinstance(soil_data, Exception) or not soil_data or soil_data.get("is_fallback"):
+        limitations.append("Gleba (ISRIC SoilGrids): Baza niedostępna – zastosowano profil referencyjny gleby lekkiej (piasek gliniasty, AWC: 30.9 mm dla 30 cm).")
+        if isinstance(soil_data, Exception) or not soil_data:
+            soil_data = {
+                "soil_category": "lekka", "awc_mm": 30.9, "texture_name": "piasek gliniasty (profil referencyjny)",
+                "is_fallback": True
+            }
 
     # Bezpieczna obsługa rzeźby terenu / hydro
     if isinstance(terrain_data, Exception) or not terrain_data:
-        limitations.append("Ostrzeżenie: Dane rzeźby terenu niedostępne. Przyjęto płaski teren bez rowów w pobliżu.")
+        limitations.append("Rzeźba terenu i hydrografia: Usługi NMT/IMGW niedostępne – przyjęto płaski teren (spadek 1.8%) bez rowów.")
         terrain_data = {
-            "slope_percent": 1.0, "distance_to_ditch_m": 1000.0
+            "slope_percent": 1.8, "is_slope_fallback": True, "distance_to_ditch_m": None
         }
+    else:
+        if terrain_data.get("is_slope_fallback"):
+            limitations.append("Numeryczny Model Terenu (NMT): Usługi wysokościowe niedostępne – spadek terenu oszacowano wartością 1.8%.")
+        if terrain_data.get("distance_to_ditch_m") is None:
+            limitations.append("Hydrografia: W buforze 500 m od działki nie zidentyfikowano rowów melioracyjnych ani cieków wodnych.")
+
+    # Flaga fallbacku z ULDK GUGiK
+    if getattr(parcel, "is_fallback", False):
+        limitations.append("ULDK GUGiK: Brak geometrii działki z państwowego rejestru katastralnego – przyjęto przybliżoną lokalizację z bazy TERYT.")
 
     # 3. Obliczenia agrohydrologiczne
     kbw_30d = calculate_kbw(
@@ -149,12 +199,20 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     # 5. Generowanie ustrukturyzowanych kart zaleceń (Report Generator)
     retention_actions = generate_retention_actions(rules_eval["active_rules"])
+    
+    fc_7d_p = weather_data.get("forecast_7d_precip_mm") or 0.0
+    wind_max_7d = max(
+        [pt.get("wind_max_ms") or 0.0 for pt in weather_data.get("raw_daily_series", [])[-16:]] or [0.0]
+    )
+
     irrigation_rec = generate_irrigation_recommendation(
         irrigation_needed=rules_eval["irrigation_needed"],
         deficit_mm=rules_eval["deficit_mm"],
         awc_mm=soil_data["awc_mm"],
         soil_category=soil_data["soil_category"],
-        crop_name=request.crop
+        crop_name=request.crop,
+        forecast_7d_precip_mm=fc_7d_p,
+        wind_max_ms=wind_max_7d
     )
 
     # Diagnoza (Etap 1) + Szereg 60 dni historii i 60 dni prognozy długoterminowej (6 dekad)
@@ -244,9 +302,14 @@ async def analyze_parcel(request: AnalyzeRequest):
 
         day_from = dec_idx * 10 + 1
         day_to = dec_idx * 10 + len(chunk)
+        if dec_idx >= 2:
+            period_label_txt = f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni) – Scenariusz agroklimatyczny"
+        else:
+            period_label_txt = f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni) – Prognoza synoptyczna"
+
         decades_list.append(DecadeForecastPoint(
             decade_number=dec_idx + 1,
-            period_label=f"{roman_numerals[dec_idx]} dekada (+{day_from}..+{day_to} dni)",
+            period_label=period_label_txt,
             start_date=start_d,
             end_date=end_d,
             crop_kc=round(dec_kc, 2),
@@ -260,6 +323,9 @@ async def analyze_parcel(request: AnalyzeRequest):
         ))
 
     forecast_60d_kbw_total = round(sum(d.kbw_decade_mm for d in decades_list), 1) if decades_list else None
+
+    # Obliczenie 10-letniej podatności historycznej działki na suszę rolniczą
+    vulnerability_10y = calculate_10y_vulnerability(lat, lon, parcel.voivodeship)
 
     step1_diag = Diagnosis(
         kbw_30d_mm=kbw_30d,
@@ -275,6 +341,9 @@ async def analyze_parcel(request: AnalyzeRequest):
         ndmi_current=sentinel_data["ndmi_current"],
         slope_percent=terrain_data["slope_percent"],
         distance_to_ditch_m=terrain_data["distance_to_ditch_m"],
+        nearest_river=terrain_data.get("nearest_river"),
+        river_distance_m=terrain_data.get("river_distance_m"),
+        water_level_cm=terrain_data.get("water_level_cm"),
         primary_causes=rules_eval["primary_causes"],
         precipitation_30d_mm=weather_data.get("precipitation_30d_mm"),
         et0_30d_mm=weather_data.get("et0_30d_mm"),
@@ -286,6 +355,7 @@ async def analyze_parcel(request: AnalyzeRequest):
         critical_threshold_kbw_60d_mm=crit_threshold_60d,
         daily_weather_series=daily_series or None,
         forecast_60d_decades=decades_list or None,
+        historical_vulnerability=ClimateVulnerability10Y(**vulnerability_10y),
     )
 
     sources = [
@@ -293,18 +363,47 @@ async def analyze_parcel(request: AnalyzeRequest):
         "Meteorologia: Open-Meteo Archive / Forecast API (metodyka FAO-56 Penman-Monteith)",
         "Teledetekcja: Copernicus Data Space Ecosystem (CDSE) / Sentinel-2 L2A Process API",
         "Gleba i uziarnienie: ISRIC SoilGrids v2.0 REST API + równania Saxtona & Rawlsa (2006)",
-        "Hydrografia i rzeźba: IMGW-PIB Hydro / PGW Wody Polskie Hydroportal + Geoportal NMT"
+        "Hydrografia i rzeźba: IMGW-PIB Hydro / OpenStreetMap Hydro + Geoportal NMT"
     ]
 
     exec_time_ms = int((time.time() - start_time) * 1000)
 
+    # Obliczenie wskaźnika wiarygodności danych (Confidence Index)
+    conf_score = 100
+    if weather_data.get("is_fallback"):
+        conf_score -= 15
+    if sentinel_data.get("ndvi_current") is None:
+        conf_score -= 20
+    if soil_data.get("is_fallback"):
+        conf_score -= 20
+    if terrain_data.get("is_slope_fallback"):
+        conf_score -= 10
+    if getattr(parcel, "is_fallback", False):
+        conf_score -= 15
+
+    conf_level = "Wysoka" if conf_score >= 80 else ("Średnia" if conf_score >= 55 else "Obniżona")
+
+    target_date_label = request.target_date or datetime.now().strftime("%Y-%m-%d")
+
+    data_freshness = {
+        "Granice działki (ULDK GUGiK)": "Kataster bieżący (stan na żywo)" if not getattr(parcel, "is_fallback", False) else "Przybliżona lokalizacja TERYT",
+        "Meteorologia (Open-Meteo)": f"Zakres 60 dni wstecz do {target_date_label}",
+        "Teledetekcja (Sentinel-2)": f"Scena z dnia {sentinel_data.get('scene_date')}" if sentinel_data.get("scene_date") else "Brak bezchmurnej sceny (<15% chmur)",
+        "Gleba (ISRIC SoilGrids)": "Model statyczny 250 m (ISRIC v2.0)" if not soil_data.get("is_fallback") else "Profil referencyjny IUNG",
+        "Wysokość i cieki (NMT / OSM)": "Numeryczny Model Terenu GUGiK / OpenStreetMap"
+    }
+
     metadata = ReportMetadata(
         sources=sources,
         analysis_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        target_date=target_date_label,
         sentinel_scene_date=sentinel_data.get("scene_date"),
         cloud_cover_percent=sentinel_data.get("cloud_cover_percent"),
         limitations=limitations,
-        execution_time_ms=exec_time_ms
+        execution_time_ms=exec_time_ms,
+        data_freshness=data_freshness,
+        confidence_level=conf_level,
+        confidence_score=conf_score
     )
 
     return AnalysisResponse(
