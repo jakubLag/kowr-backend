@@ -404,6 +404,168 @@ export default function Step1Assessment({
         </div>
       </div>
 
+      {/* 1.1b Wieloletnia podatność działki na suszę (ostatnie 10 lat) */}
+      {diagnosis.climatology_10y && (() => {
+        const clim = diagnosis.climatology_10y;
+        const vulnLevel = (clim.historical_vulnerability_level || "UMIARKOWANA").toUpperCase();
+        const vulnTextClass = vulnLevel.includes("WYSOK")
+          ? "text-gov-danger"
+          : vulnLevel.includes("UMIARK")
+            ? "text-gov-warning"
+            : "text-gov-success";
+        const totalYears = clim.total_years_analyzed || 10;
+        const peakMonths =
+          clim.peak_risk_months && clim.peak_risk_months.length > 0
+            ? clim.peak_risk_months.join(", ")
+            : "—";
+        const yearlySeries = Array.isArray(clim.yearly_series)
+          ? clim.yearly_series
+          : [];
+
+        return (
+          <div className="space-y-3 pt-4 print:pt-2 print:break-inside-avoid">
+            <h3 className="text-base font-bold text-gov-navy">
+              1.1b. Wieloletnia podatność działki na suszę (ostatnie {totalYears} lat)
+            </h3>
+            <p className="text-sm text-gov-secondary leading-relaxed">
+              Analiza 10-letnich danych meteorologicznych dla tej działki (Open-Meteo Archive)
+              pozwala odróżnić bieżący stan pogody od trwałej podatności pola na suszę rolniczą
+              w sezonie wegetacyjnym (IV–IX).
+            </p>
+
+            <table className="gov-table border border-gov-border tabular-nums">
+              <thead>
+                <tr>
+                  <th>Wskaźnik wieloletni (10 lat)</th>
+                  <th className="text-right">Wartość dla działki</th>
+                  <th>Interpretacja</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="font-bold">Częstość występowania suszy rolniczej</td>
+                  <td className="text-right font-mono font-bold text-gov-navy">
+                    {clim.drought_years_count} z {totalYears} lat
+                  </td>
+                  <td className="text-gov-secondary">
+                    Liczba sezonów z przekroczeniem progu krytycznego KBW IUNG ({critThreshold} mm).
+                  </td>
+                </tr>
+                <tr>
+                  <td className="font-bold">Poziom podatności historycznej</td>
+                  <td className={`text-right font-bold ${vulnTextClass}`}>
+                    {vulnLevel}
+                  </td>
+                  <td className="text-gov-secondary">
+                    Największe ryzyko niedoboru wody występuje w miesiącach:{" "}
+                    <strong className="text-gov-text">{peakMonths}</strong>.
+                  </td>
+                </tr>
+                {clim.kbw_60d_10y_median_mm != null && (
+                  <tr>
+                    <td className="font-bold">10-letnia mediana KBW (okno 60-dniowe)</td>
+                    <td className="text-right font-mono font-bold text-gov-navy">
+                      {clim.kbw_60d_10y_median_mm > 0 ? "+" : ""}
+                      {clim.kbw_60d_10y_median_mm.toFixed(1)} mm
+                    </td>
+                    <td className="text-gov-secondary">
+                      Lokalna norma dla tej pory roku (obecnie:{" "}
+                      <span className="font-mono font-semibold text-gov-text">
+                        {diagnosis.kbw_60d_mm > 0 ? "+" : ""}
+                        {diagnosis.kbw_60d_mm.toFixed(1)} mm
+                      </span>
+                      ).
+                    </td>
+                  </tr>
+                )}
+                {(clim.max_dry_spell_days_30d != null ||
+                  clim.avg_max_dry_spell_10y != null) && (
+                  <tr>
+                    <td className="font-bold">Najdłuższy ciąg dni bezopadowych (&lt; 1 mm)</td>
+                    <td className="text-right font-mono font-bold text-gov-navy">
+                      {clim.max_dry_spell_days_30d != null
+                        ? `${clim.max_dry_spell_days_30d} dni (30d)`
+                        : "—"}
+                    </td>
+                    <td className="text-gov-secondary">
+                      {clim.avg_max_dry_spell_10y != null
+                        ? `Średni najdłuższy okres bezopadowy z 10 lat: ${clim.avg_max_dry_spell_10y.toFixed(1)} dni.`
+                        : "Ciąg dni z opadem poniżej 1 mm."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {yearlySeries.length > 0 && (
+              <div className="border border-gov-border p-4 bg-white print:p-3 print:break-inside-avoid">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-bold text-gov-secondary">
+                    Najniższy 60-dniowy bilans wodny sezonu wegetacyjnego (IV–IX) w kolejnych latach [mm]
+                  </span>
+                  <span className="text-xs text-gov-secondary inline-flex items-center gap-1.5">
+                    <span className="inline-block w-4 h-0.5 border-b-2 border-dashed border-[#7F1D1D]" />
+                    Próg suszy IUNG ({critThreshold} mm)
+                  </span>
+                </div>
+                <div className="w-full h-56 print:h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={yearlySeries}
+                      margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="2 2" stroke="#D2D6DC" />
+                      <XAxis
+                        dataKey="year"
+                        tick={{ fontSize: 11, fill: "#4A5568" }}
+                      />
+                      <YAxis
+                        unit=" mm"
+                        width={60}
+                        tick={{ fontSize: 11, fill: "#1B1B1B" }}
+                      />
+                      <Tooltip
+                        formatter={(value: number) => [
+                          `${value} mm`,
+                          "Min. 60-dniowy KBW (IV–IX)",
+                        ]}
+                        labelFormatter={(label) => `Rok ${label}`}
+                        contentStyle={{
+                          borderRadius: "2px",
+                          border: "1px solid #D2D6DC",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <ReferenceLine y={0} stroke="#0B2240" />
+                      <ReferenceLine
+                        y={critThreshold}
+                        stroke="#7F1D1D"
+                        strokeWidth={1.5}
+                        strokeDasharray="5 3"
+                      />
+                      <Bar dataKey="season_kbw_mm" radius={[2, 2, 0, 0]} barSize={28}>
+                        {yearlySeries.map((entry, idx) => (
+                          <Cell
+                            key={`yr-cell-${idx}`}
+                            fill={
+                              entry.drought_occurred || entry.season_kbw_mm < critThreshold
+                                ? "#C81E1E"
+                                : entry.season_kbw_mm < 0
+                                  ? "#B45309"
+                                  : "#156534"
+                            }
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* 1.2 Przebieg bilansu w czasie: historia + 60 dni prognozy / weryfikacji ex-post */}
       <div className="space-y-3 pt-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

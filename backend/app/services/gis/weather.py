@@ -337,18 +337,20 @@ async def fetch_10y_climatology(
         logger.info(f"Pobrano dane 10y z cache dla ({rounded_lat}, {rounded_lon}), rok {parsed_date.year}")
         return climatology_cache[cache_key]
 
-    start_date = parsed_date - timedelta(days=365 * 10 + 2)
+    max_archive_date = date.today() - timedelta(days=2)
+    archive_end_date = min(parsed_date, max_archive_date)
+    start_date = archive_end_date - timedelta(days=365 * 10 + 2)
     params = {
         "latitude": rounded_lat,
         "longitude": rounded_lon,
         "start_date": start_date.isoformat(),
-        "end_date": parsed_date.isoformat(),
+        "end_date": archive_end_date.isoformat(),
         "daily": "precipitation_sum,et0_fao_evapotranspiration,temperature_2m_mean",
         "timezone": "UTC",
     }
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=6.0) as client:
             response = await client.get(OPEN_METEO_ARCHIVE_URL, params=params)
             if response.status_code != 200:
                 logger.error(f"Open-Meteo API error: {response.status_code} - {response.text}")
@@ -418,22 +420,15 @@ def analyze_climatology_metrics(
     df: Optional[Any],
     target_date: Union[date, str],
     soil_kbw_threshold: float = -150.0,
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """Przeprowadza kompleksową analizę hydrologiczno-klimatyczną na podstawie 10 lat danych."""
-    if df is None or getattr(df, "empty", True) or np is None:
-        return {
-            "drought_years_count": 0,
-            "total_years_analyzed": 0,
-            "historical_vulnerability_level": "BRAK DANYCH",
-            "peak_risk_months": [],
-            "max_dry_spell_days_30d": 0,
-            "avg_max_dry_spell_10y": 0.0,
-            "kbw_60d_10y_median_mm": 0.0,
-            "error": "Brak danych historycznych",
-        }
+    if df is None or getattr(df, "empty", True) or np is None or pd is None:
+        return None
 
     parsed_date = _parse_target_date(target_date)
     df = df.copy()
+    df["precipitation"] = df["precipitation"].fillna(0.0)
+    df["et0"] = df["et0"].fillna(0.0)
     df["kbw_daily"] = df["precipitation"] - df["et0"]
     df["year"] = df["date"].dt.year
     df["month"] = df["date"].dt.month
@@ -445,15 +440,23 @@ def analyze_climatology_metrics(
     total_years_analyzed = len(years_analyzed)
     drought_years_count = 0
 
-    yearly_60d_kbw = []
+    yearly_series = []
     for yr in years_analyzed:
         yr_data = vegetation_df[vegetation_df["year"] == yr].sort_values("date")
-        rolling_60d = yr_data["kbw_daily"].rolling(window=60).sum()
-        min_kbw_60d = rolling_60d.min() if not rolling_60d.empty else 0.0
-        yearly_60d_kbw.append(min_kbw_60d)
-
-        if min_kbw_60d < soil_kbw_threshold:
+        rolling_60d = yr_data["kbw_daily"].rolling(window=60, min_periods=30).sum()
+        min_kbw_60d = (
+            float(rolling_60d.min())
+            if not rolling_60d.empty and not pd.isna(rolling_60d.min())
+            else 0.0
+        )
+        drought_occurred = min_kbw_60d < soil_kbw_threshold
+        if drought_occurred:
             drought_years_count += 1
+        yearly_series.append({
+            "year": int(yr),
+            "season_kbw_mm": round(min_kbw_60d, 1),
+            "drought_occurred": drought_occurred,
+        })
 
     if total_years_analyzed > 0:
         drought_ratio = drought_years_count / total_years_analyzed
@@ -466,8 +469,8 @@ def analyze_climatology_metrics(
     else:
         historical_vulnerability_level = "NISKA"
 
-    # 2. Peak risk months
-    monthly_avg_kbw = df.groupby("month")["kbw_daily"].sum().to_dict()
+    # 2. Peak risk months (średnia miesięczna z analizowanych lat)
+    monthly_avg_kbw = (df.groupby("month")["kbw_daily"].sum() / max(1, total_years_analyzed)).to_dict()
     sorted_months = sorted(monthly_avg_kbw.items(), key=lambda x: x[1])
     month_names_pl = {
         1: "styczeń", 2: "luty", 3: "marzec", 4: "kwiecień",
@@ -480,8 +483,21 @@ def analyze_climatology_metrics(
     max_dry_spell_days_30d = calculate_dry_spells(df, window_days=30)
     avg_max_dry_spell_10y = calculate_10y_max_dry_spells(df)
 
-    # 4. Mediana 10-letnia KBW dla okna 60-dniowego
-    kbw_60d_10y_median_mm = float(np.median(yearly_60d_kbw)) if yearly_60d_kbw else 0.0
+    # 4. Mediana 10-letnia KBW dla tego samego 60-dniowego okna roku
+    window_kbw_list = []
+    for yr in years_analyzed:
+        yr_all = df[df["year"] == yr].sort_values("date")
+        try:
+            yr_target = date(int(yr), parsed_date.month, parsed_date.day)
+        except ValueError:
+            yr_target = date(int(yr), parsed_date.month, min(28, parsed_date.day))
+        yr_target_ts = pd.Timestamp(yr_target)
+        mask_60d = (yr_all["date"] <= yr_target_ts) & (yr_all["date"] >= yr_target_ts - timedelta(days=60))
+        kbw_sum = yr_all.loc[mask_60d, "kbw_daily"].sum()
+        if not pd.isna(kbw_sum):
+            window_kbw_list.append(float(kbw_sum))
+
+    kbw_60d_10y_median_mm = float(np.median(window_kbw_list)) if window_kbw_list else 0.0
 
     return {
         "drought_years_count": int(drought_years_count),
@@ -491,4 +507,5 @@ def analyze_climatology_metrics(
         "max_dry_spell_days_30d": int(max_dry_spell_days_30d),
         "avg_max_dry_spell_10y": round(avg_max_dry_spell_10y, 1),
         "kbw_60d_10y_median_mm": round(kbw_60d_10y_median_mm, 1),
+        "yearly_series": yearly_series,
     }

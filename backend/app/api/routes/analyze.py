@@ -10,7 +10,8 @@ from app.models.schemas import (
     DecadeForecastPoint,
     Diagnosis,
     ReportMetadata,
-    ClimateVulnerability10Y
+    ClimateVulnerability10Y,
+    Climatology10y,
 )
 from app.services.gis.uldk import fetch_parcel_from_uldk
 from app.services.gis.weather import (
@@ -68,21 +69,23 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     kc = get_crop_kc(request.crop, month=month)
 
-    # 2. Równoległe pobranie pozostałych 4 źródeł danych z return_exceptions=True (Graceful Degradation)
+    # 2. Równoległe pobranie źródeł danych z return_exceptions=True (Graceful Degradation)
     weather_task = fetch_weather_data(lat, lon, target_date_str=target_date_converted.isoformat())
+    climatology_task = fetch_10y_climatology(lat, lon, target_date_converted)
     sentinel_task = fetch_sentinel_indices(lat, lon, target_date_converted.isoformat(), crop_name=request.crop)
     soil_task = fetch_soil_properties(lat, lon)
     terrain_task = fetch_terrain_and_hydro(lat, lon, ditch_distance_m=request.ditch_distance_m)
 
     results = await asyncio.gather(
         weather_task,
+        climatology_task,
         sentinel_task,
         soil_task,
         terrain_task,
         return_exceptions=True
     )
 
-    weather_data, sentinel_data, soil_data, terrain_data = results
+    weather_data, climatology_df, sentinel_data, soil_data, terrain_data = results
 
     # Lista ograniczeń (limitations) i rejestrowanie ewentualnych wyjątków z usług
     limitations = []
@@ -345,6 +348,20 @@ async def analyze_parcel(request: AnalyzeRequest):
     # Obliczenie 10-letniej podatności historycznej działki na suszę rolniczą
     vulnerability_10y = calculate_10y_vulnerability(lat, lon, parcel.voivodeship)
 
+    climatology_10y_obj = None
+    if not isinstance(climatology_df, Exception) and climatology_df is not None:
+        clim_metrics = analyze_climatology_metrics(
+            climatology_df,
+            target_date_converted,
+            soil_kbw_threshold=crit_threshold_60d,
+        )
+        if clim_metrics:
+            climatology_10y_obj = Climatology10y(**clim_metrics)
+    if climatology_10y_obj is None:
+        limitations.append(
+            "Klimatologia 10-letnia (Open-Meteo Archive): Dane wieloletnie dla działki były chwilowo niedostępne."
+        )
+
     step1_diag = Diagnosis(
         kbw_30d_mm=kbw_30d,
         kbw_60d_mm=kbw_60d,
@@ -380,6 +397,7 @@ async def analyze_parcel(request: AnalyzeRequest):
         daily_weather_series=daily_series or None,
         forecast_60d_decades=decades_list or None,
         historical_vulnerability=ClimateVulnerability10Y(**vulnerability_10y),
+        climatology_10y=climatology_10y_obj,
     )
 
     dem_source_label = terrain_data.get("dem_source") or "DEM (niedostępny)"

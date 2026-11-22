@@ -56,6 +56,23 @@ class DecadeForecastPoint(BaseModel):
     kbw_60d_rolling_mm: float = Field(..., description="Prognozowany 60-dniowy bilans kroczący KBW na koniec dekady (mm)")
     risk_status: str = Field(..., description="Ocena ryzyka i rekomendacja na dekadę")
 
+class Climatology10yYearPoint(BaseModel):
+    year: int = Field(..., description="Rok sezonu wegetacyjnego")
+    season_kbw_mm: float = Field(..., description="Najniższy 60-dniowy KBW w sezonie IV-IX (mm)")
+    drought_occurred: bool = Field(..., description="Czy przekroczono próg krytyczny suszy IUNG")
+
+
+class Climatology10y(BaseModel):
+    drought_years_count: int = Field(..., description="Liczba lat z suszą rolniczą w analizowanym okresie")
+    total_years_analyzed: int = Field(..., description="Liczba przeanalizowanych lat")
+    historical_vulnerability_level: str = Field(..., description="WYSOKA | UMIARKOWANA | NISKA")
+    peak_risk_months: List[str] = Field(default_factory=list, description="Miesiące o największym deficycie wody")
+    max_dry_spell_days_30d: Optional[int] = Field(None, description="Najdłuższy ciąg dni bezopadowych (<1mm) w 30 dniach")
+    avg_max_dry_spell_10y: Optional[float] = Field(None, description="Średni najdłuższy ciąg dni bezopadowych z 10 lat")
+    kbw_60d_10y_median_mm: Optional[float] = Field(None, description="10-letnia mediana 60-dniowego KBW dla tej pory roku")
+    yearly_series: Optional[List[Climatology10yYearPoint]] = Field(default=None, description="Seria roczna min. KBW sezonu IV-IX")
+
+
 class ClimateVulnerability10Y(BaseModel):
     drought_frequency_years: str = Field(..., description="Częstość występowania suszy rolniczej, np. '7 na 10 lat'")
     drought_frequency_percent: int = Field(..., description="Procent lat z suszą w ostatnim 10-leciu (np. 70%)")
@@ -100,6 +117,7 @@ class Diagnosis(BaseModel):
     daily_weather_series: Optional[List[DailyWeatherPoint]] = Field(default=None, description="Szereg czasowy: 60 dni historii + 60 dni prognozy długoterminowej")
     forecast_60d_decades: Optional[List[DecadeForecastPoint]] = Field(default=None, description="Prognoza długoterminowa na 60 dni w podziale na 6 dekad (po 10 dni)")
     historical_vulnerability: Optional[ClimateVulnerability10Y] = Field(default=None, description="10-letnia analiza podatności historycznej działki na suszę")
+    climatology_10y: Optional[Climatology10y] = Field(default=None, description="Punktowa analiza wieloletnia (ostatnie 10 lat z Open-Meteo Archive)")
 
 class RetentionAction(BaseModel):
     id: str = Field(..., description="Unikalny identyfikator reguły")
