@@ -29,9 +29,13 @@ _IMGW_STATIONS_CACHE: List[Dict[str, Any]] = []
 IMGW_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "imgw_stations.json")
 
 WATERWAY_TYPES = {"ditch", "drain", "stream", "canal", "river"}
-OVERPASS_TIMEOUT_SECONDS = 4.0
+OVERPASS_TIMEOUT_SECONDS = 6.0
 DEM_STEP_METERS = 50.0
-OPEN_METEO_ELEVATION_TIMEOUT_SECONDS = 3.0
+OPEN_METEO_ELEVATION_TIMEOUT_SECONDS = 5.0
+OVERPASS_HEADERS = {
+    "User-Agent": "KOWR-ContraSusza/1.0 (HackNation 2026; https://contrasusza.vercel.app)",
+    "Accept": "application/json",
+}
 
 _ASPECT_COMPASS_PL = [
     "północny",
@@ -247,6 +251,7 @@ async def query_overpass_hydro_and_landscape(
             resp = await client.post(
                 mirror_url,
                 data={"data": query},
+                headers=OVERPASS_HEADERS,
                 timeout=OVERPASS_TIMEOUT_SECONDS,
             )
             if resp.status_code == 200:

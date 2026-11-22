@@ -16,7 +16,7 @@ from app.core.config import settings
 
 def test_overpass_query_contains_waterways_wetlands_and_windbreaks():
     q = _build_overpass_query(52.185, 21.567)
-    assert "[timeout:4]" in q
+    assert "[timeout:6]" in q
     assert 'way["waterway"~"ditch|drain|stream|canal|river"](around:500,52.185,21.567)' in q
     assert 'way["natural"~"water|wetland"](around:500,52.185,21.567)' in q
     assert 'relation["natural"~"water|wetland"](around:500,52.185,21.567)' in q

@@ -6,10 +6,11 @@ Wykorzystuje równania Saxtona & Rawlsa do estymacji Polowej Pojemności Wodnej 
 
 from typing import Dict, Any, Tuple
 import httpx
+from cachetools import TTLCache
 from app.core.config import settings
 from app.services.science.saxton_rawls import calculate_saxton_rawls_awc
 
-_SOIL_CACHE: Dict[Tuple[float, float], Dict[str, Any]] = {}
+_SOIL_CACHE: TTLCache = TTLCache(maxsize=500, ttl=86400)
 
 async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
     """
@@ -34,7 +35,8 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
     is_fallback = True
 
     try:
-        async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS) as client:
+        soil_timeout = max(10.0, settings.SERVICE_TIMEOUT_SECONDS)
+        async with httpx.AsyncClient(timeout=soil_timeout) as client:
             resp = await client.get(settings.SOILGRIDS_BASE_URL, params=params)
             if resp.status_code == 200:
                 data = resp.json()
@@ -83,6 +85,8 @@ async def fetch_soil_properties(lat: float, lon: float) -> Dict[str, Any]:
         "is_fallback": is_fallback,
         **retention_data
     }
-    _SOIL_CACHE[cache_key] = result
+    # Cachujemy tylko realne odpowiedzi SoilGrids, aby przejściowy timeout nie został utrwalony
+    if not is_fallback:
+        _SOIL_CACHE[cache_key] = result
     return result
 
