@@ -1,7 +1,6 @@
 import time
 import asyncio
-from datetime import datetime
-from datetime import date
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter, HTTPException, status
 
 from app.models.schemas import (
@@ -19,6 +18,7 @@ from app.services.gis.weather import (
     calculate_10y_vulnerability,
     fetch_10y_climatology,
     analyze_climatology_metrics,
+    MONTHLY_CLIMATE_NORMALS_PL,
 )
 from app.services.gis.satellite import fetch_sentinel_indices
 from app.services.gis.soil import fetch_soil_properties
@@ -57,20 +57,20 @@ async def analyze_parcel(request: AnalyzeRequest):
     # Data analizy i współczynnik Kc
     if request.target_date:
         try:
-            target_dt = datetime.strptime(request.target_date, "%Y-%m-%d")
-            month = target_dt.month
+            target_date_converted = date.fromisoformat(request.target_date)
+            month = target_date_converted.month
         except ValueError:
-            month = 7
+            target_date_converted = date.today()
+            month = target_date_converted.month
     else:
-        month = datetime.now().month
+        target_date_converted = date.today()
+        month = target_date_converted.month
 
     kc = get_crop_kc(request.crop, month=month)
 
     # 2. Równoległe pobranie pozostałych 4 źródeł danych z return_exceptions=True (Graceful Degradation)
-    target_date_converted = date.fromisoformat(request.target_date)
-    
-    weather_task = fetch_10y_climatology(lat, lon, target_date_converted)
-    sentinel_task = fetch_sentinel_indices(lat, lon, request.target_date, crop_name=request.crop)
+    weather_task = fetch_weather_data(lat, lon, target_date_str=target_date_converted.isoformat())
+    sentinel_task = fetch_sentinel_indices(lat, lon, target_date_converted.isoformat(), crop_name=request.crop)
     soil_task = fetch_soil_properties(lat, lon)
     terrain_task = fetch_terrain_and_hydro(lat, lon, ditch_distance_m=request.ditch_distance_m)
 
@@ -88,11 +88,40 @@ async def analyze_parcel(request: AnalyzeRequest):
     limitations = []
 
     # Bezpieczna obsługa pogody
-    if isinstance(weather_data, Exception) or not weather_data:
-        limitations.append("Meteorologia (Open-Meteo): Usługa chwilowo niedostępna – użyto referencyjnego modelu agrometeorologicznego.")
+    if isinstance(weather_data, Exception) or not weather_data or not weather_data.get("raw_daily_series"):
+        if isinstance(weather_data, Exception) or not weather_data:
+            limitations.append("Meteorologia (Open-Meteo): Usługa chwilowo niedostępna – użyto referencyjnego modelu agrometeorologicznego.")
+        
+        fallback_series = []
+        for d_offset in range(-60, 61):
+            cur_d = target_date_converted + timedelta(days=d_offset)
+            m_num = cur_d.month
+            norm_val = MONTHLY_CLIMATE_NORMALS_PL.get(m_num, {"et0_daily": 2.5, "precip_monthly": 45.0, "temp": 15.0})
+            fallback_series.append({
+                "date": cur_d.isoformat(),
+                "precipitation_mm": round(norm_val["precip_monthly"] / 20.0, 1) if (d_offset % 4 == 0) else 0.0,
+                "et0_mm": norm_val["et0_daily"],
+                "temp_max_c": norm_val["temp"],
+                "wind_max_ms": 3.0,
+                "is_forecast": d_offset > 0,
+            })
+            
+        p_30 = sum(d["precipitation_mm"] for d in fallback_series[30:60])
+        p_60 = sum(d["precipitation_mm"] for d in fallback_series[:60])
+        e_30 = sum(d["et0_mm"] for d in fallback_series[30:60])
+        e_60 = sum(d["et0_mm"] for d in fallback_series[:60])
+
         weather_data = {
-            "precipitation_30d_mm": 35.0, "precipitation_60d_mm": 70.0,
-            "et0_30d_mm": 110.0, "et0_60d_mm": 210.0, "mean_temperature_c": 19.0,
+            "precipitation_30d_mm": round(p_30, 1),
+            "precipitation_60d_mm": round(p_60, 1),
+            "et0_30d_mm": round(e_30, 1),
+            "et0_60d_mm": round(e_60, 1),
+            "forecast_7d_precip_mm": round(sum(d["precipitation_mm"] for d in fallback_series[61:68]), 1),
+            "forecast_7d_et0_mm": round(sum(d["et0_mm"] for d in fallback_series[61:68]), 1),
+            "forecast_60d_precip_mm": round(sum(d["precipitation_mm"] for d in fallback_series[61:]), 1),
+            "forecast_60d_et0_mm": round(sum(d["et0_mm"] for d in fallback_series[61:]), 1),
+            "mean_temperature_c": 19.0,
+            "raw_daily_series": fallback_series,
             "is_fallback": True
         }
     elif weather_data.get("is_fallback"):

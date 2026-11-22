@@ -7,18 +7,20 @@ CLOUD_COVER_MAX: int = 40
 
 
 def _load_env_file():
-    """Wczytuje zmienne środowiskowe z pliku .env w katalogu głównym projektu."""
-    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
-    if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, val = line.split("=", 1)
-                    key = key.strip()
-                    val = val.strip().strip('"').strip("'")
-                    if key not in os.environ:
-                        os.environ[key] = val
+    """Wczytuje zmienne środowiskowe z plików .env (w katalogu głównym oraz backend/)."""
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    root_dir = os.path.dirname(backend_dir)
+    for env_path in (os.path.join(backend_dir, ".env"), os.path.join(root_dir, ".env")):
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip('"').strip("'")
+                        if key not in os.environ:
+                            os.environ[key] = val
 
 _load_env_file()
 
@@ -28,8 +30,8 @@ if _proxy_val:
     for _k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
         os.environ[_k] = _proxy_val
     if "NO_PROXY" not in os.environ and "no_proxy" not in os.environ:
-        os.environ["NO_PROXY"] = "localhost,127.0.0.1,uldk.gugik.gov.pl,mapy.geoportal.gov.pl"
-        os.environ["no_proxy"] = "localhost,127.0.0.1,uldk.gugik.gov.pl,mapy.geoportal.gov.pl"
+        os.environ["NO_PROXY"] = "localhost,127.0.0.1"
+        os.environ["no_proxy"] = "localhost,127.0.0.1"
 
 class Settings(BaseModel):
     PROJECT_NAME: str = os.getenv("PROJECT_NAME", "KOWR - Zatrzymaj wodę, chroń plony")
@@ -38,7 +40,7 @@ class Settings(BaseModel):
     
     # Proxy sieciowe (np. Webshare: http://user:pass@p.webshare.io:80)
     HTTP_PROXY: Optional[str] = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
-    NO_PROXY: Optional[str] = os.getenv("NO_PROXY", "localhost,127.0.0.1,uldk.gugik.gov.pl,mapy.geoportal.gov.pl")
+    NO_PROXY: Optional[str] = os.getenv("NO_PROXY", "localhost,127.0.0.1")
     
     # Timeouts (sec) - strict 7s timeout per external service as per specification
     SERVICE_TIMEOUT_SECONDS: float = float(os.getenv("SERVICE_TIMEOUT_SECONDS", "7.0"))
