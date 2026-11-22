@@ -1,45 +1,45 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.core.config import settings
-from app.api.routes import parcel, analyze, health, crops
-
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version=settings.VERSION,
-    description=(
-        "Backend REST API dla projektu KOWR na HackNation 2026: "
-        "„Zatrzymaj wodę, chroń plony”. W 100% deterministyczny silnik decyzyjny (Zero LLM) "
-        "łączący 5 źródeł danych przestrzennych (ULDK, Open-Meteo, AWS STAC Sentinel-2, SoilGrids, NMT/Hydro)."
-    )
-)
-
-# CORS Middleware (zezwala na zapytania z Next.js frontendu)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Routery API
-app.include_router(parcel.router, prefix=settings.API_V1_PREFIX)
-app.include_router(analyze.router, prefix=settings.API_V1_PREFIX)
-app.include_router(health.router, prefix=settings.API_V1_PREFIX)
-app.include_router(crops.router, prefix=settings.API_V1_PREFIX)
-
-@app.get("/", tags=["Root"])
-def root():
-    return {
-        "project": settings.PROJECT_NAME,
-        "version": settings.VERSION,
-        "docs_url": "/docs",
-        "health_url": f"{settings.API_V1_PREFIX}/health",
-        "description": "Zatrzymaj wodę, chroń plony - Inteligentne wsparcie gospodarowania wodą w rolnictwie"
-    }
-
-if __name__ == "__main__":
-    import uvicorn
+from fastapi import FastAPI                                                                                                                                                                               
+from fastapi.middleware.cors import CORSMiddleware                                                                                                                                                        
+                                                                                                                                                                                                            
+from app.core.config import settings                                                                                                                                                                      
+from app.api.routes import parcel, analyze, health, crops                                                                                                                                                 
+                                                                                                                                                                                                            
+app = FastAPI(                                                                                                                                                                                            
+    title=settings.PROJECT_NAME,                                                                                                                                                                          
+    version=settings.VERSION,                                                                                                                                                                             
+    description=(                                                                                                                                                                                         
+        "Backend REST API dla projektu KOWR na HackNation 2026: "                                                                                                                                         
+        "„Zatrzymaj wodę, chroń plony”. W 100% deterministyczny silnik decyzyjny (Zero LLM) "                                                                                                             
+        "łączący 5 źródeł danych przestrzennych (ULDK, Open-Meteo, AWS STAC Sentinel-2, SoilGrids, NMT/Hydro)."                                                                                           
+    )                                                                                                                                                                                                     
+)                                                                                                                                                                                                         
+                                                                                                                                                                                                            
+# CORS Middleware (zezwala na zapytania z Next.js frontendu oraz domen Vercel)                                                                                                                            
+app.add_middleware(                                                                                                                                                                                       
+    CORSMiddleware,                                                                                                                                                                                       
+    allow_origins=settings.ALLOWED_ORIGINS,                                                                                                                                                               
+    allow_origin_regex=r"https://.*\.vercel\.app",                                                                                                                                                        
+    allow_credentials=True,                                                                                                                                                                               
+    allow_methods=["*"],                                                                                                                                                                                  
+    allow_headers=["*"],                                                                                                                                                                                  
+)                                                                                                                                                                                                         
+                                                                                                                                                                                                            
+# Routery API                                                                                                                                                                                             
+app.include_router(parcel.router, prefix=settings.API_V1_PREFIX)                                                                                                                                          
+app.include_router(analyze.router, prefix=settings.API_V1_PREFIX)                                                                                                                                         
+app.include_router(health.router, prefix=settings.API_V1_PREFIX)                                                                                                                                          
+app.include_router(crops.router, prefix=settings.API_V1_PREFIX)                                                                                                                                           
+                                                                                                                                                                                                            
+@app.get("/", tags=["Root"])                                                                                                                                                                              
+def root():                                                                                                                                                                                               
+    return {                                                                                                                                                                                              
+        "project": settings.PROJECT_NAME,                                                                                                                                                                 
+        "version": settings.VERSION,                                                                                                                                                                      
+        "docs_url": "/docs",                                                                                                                                                                              
+        "health_url": f"{settings.API_V1_PREFIX}/health",                                                                                                                                                 
+        "description": "Zatrzymaj wodę, chroń plony - Inteligentne wsparcie gospodarowania wodą w rolnictwie"                                                                                             
+    }                                                                                                                                                                                                     
+                                                                                                                                                                                                            
+if __name__ == "__main__":                                                                                                                                                                                
+    import uvicorn                                                                                                                                                                                        
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
