@@ -98,7 +98,7 @@ export default function CropRotationComparison({
   }).sort((a, b) => b.kbw30 - a.kbw30);
 
   return (
-    <section className="pt-8 border-t-2 border-gov-navy space-y-5 print:break-inside-avoid">
+    <section className="pt-8 border-t-2 border-gov-navy space-y-5 print:pt-4 print:space-y-3">
       <div>
         <p className="text-xs font-bold text-gov-blue mb-1">
           Planowanie płodozmianu — dopasowanie uprawy do gleby

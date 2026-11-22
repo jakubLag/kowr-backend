@@ -85,9 +85,9 @@ export default function BasicFarmerReport({
         : "bg-gov-warning-bg text-gov-warning border-gov-warning/30";
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 print:space-y-5">
       {/* ETAP 1: Prosta diagnoza dla rolnika */}
-      <section className="pt-6 border-t-2 border-gov-navy space-y-5 print:break-inside-avoid">
+      <section className="pt-6 border-t-2 border-gov-navy space-y-5 print:pt-4 print:space-y-3">
         <div>
           <p className="text-xs font-bold text-gov-blue mb-1">
             Etap 1 z 3 — Co dzieje się na polu?
@@ -131,7 +131,7 @@ export default function BasicFarmerReport({
         </div>
 
         {/* 3 proste karty z kluczowymi faktami o polu */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 tabular-nums">
+        <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-4 print:gap-2.5 tabular-nums print:break-inside-avoid">
           <div className="border border-gov-border bg-gov-surface/50 p-4 space-y-1">
             <div className="text-xs font-bold text-gov-secondary">
               Bilans wody (ostatnie 30 dni)
@@ -210,11 +210,11 @@ export default function BasicFarmerReport({
         </div>
 
         {/* Prosta lista przyczyn */}
-        <div className="space-y-2">
+        <div className="space-y-2 print:break-inside-avoid">
           <h3 className="text-sm font-bold text-gov-navy">
             Dlaczego taka jest sytuacja na działce?
           </h3>
-          <ul className="list-disc list-inside space-y-1.5 text-sm text-gov-text bg-white border border-gov-border p-4">
+          <ul className="list-disc list-inside space-y-1.5 text-sm text-gov-text bg-white border border-gov-border p-4 print:p-3">
             {causes.map((cause, idx) => (
               <li key={idx} className="leading-relaxed">
                 {cause}
@@ -225,7 +225,7 @@ export default function BasicFarmerReport({
       </section>
 
       {/* ETAP 2: Konkretne działania retencyjne (priorytet) */}
-      <section className="pt-6 border-t-2 border-gov-navy space-y-5 print:break-inside-avoid">
+      <section className="pt-6 border-t-2 border-gov-navy space-y-5 print:pt-4 print:space-y-3">
         <div>
           <p className="text-xs font-bold text-gov-success mb-1">
             Etap 2 z 3 — Priorytet przed nawadnianiem
@@ -240,7 +240,7 @@ export default function BasicFarmerReport({
           </p>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 print:space-y-2.5">
           {retentionActions.map((rec, index) => {
             const fallback = RETENTION_ENRICHMENT_BY_ID[rec.id];
             const waterGainMm = rec.water_gain_mm ?? fallback?.water_gain_mm;
@@ -254,7 +254,7 @@ export default function BasicFarmerReport({
             return (
               <div
                 key={rec.id}
-                className="border border-gov-border bg-white p-5 space-y-3"
+                className="border border-gov-border bg-white p-5 space-y-3 print:p-3.5 print:space-y-2 print:break-inside-avoid"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h3 className="text-base font-bold text-gov-navy">
@@ -298,7 +298,7 @@ export default function BasicFarmerReport({
       </section>
 
       {/* ETAP 3: Prosta decyzja o nawadnianiu */}
-      <section className="pt-6 border-t-2 border-gov-navy space-y-5 print:break-inside-avoid">
+      <section className="pt-6 border-t-2 border-gov-navy space-y-5 print:pt-4 print:space-y-3">
         <div>
           <p className="text-xs font-bold text-gov-blue mb-1">
             Etap 3 z 3 — Decyzja o podlewaniu
@@ -309,7 +309,7 @@ export default function BasicFarmerReport({
         </div>
 
         {irrigation.needed ? (
-          <div className="space-y-4">
+          <div className="space-y-4 print:space-y-3">
             <div className="gov-callout-info">
               <div className="text-base font-bold text-gov-navy">
                 Tak — zalecane nawadnianie interwencyjne ({irrigation.dose_mm.toFixed(0)} l/m²)
@@ -319,7 +319,7 @@ export default function BasicFarmerReport({
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 tabular-nums">
+            <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-4 print:gap-2.5 tabular-nums print:break-inside-avoid">
               <div className="border border-gov-border bg-white p-4">
                 <div className="text-xs font-bold text-gov-secondary">
                   Jednorazowa dawka wody
@@ -384,7 +384,7 @@ export default function BasicFarmerReport({
 
       {/* Transparentność + CTA do pełnego raportu szczegółowego */}
       <section className="pt-6 border-t border-gov-border space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-gov-surface border border-gov-border px-4 py-3 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-gov-surface border border-gov-border px-4 py-3 text-xs print:break-inside-avoid">
           <div className="space-y-0.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-bold text-gov-navy">

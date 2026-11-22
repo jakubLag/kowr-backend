@@ -206,7 +206,7 @@ export default function Step1Assessment({
         : diagnosis.kbw_60d_mm;
 
   return (
-    <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:break-inside-avoid">
+    <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:pt-4 print:space-y-4">
       <div>
         <p className="text-xs font-bold text-gov-blue mb-1">
           Etap 1 z 3 — Diagnoza sytuacji wodnej
@@ -248,7 +248,7 @@ export default function Step1Assessment({
           <strong>1 litra wody na 1 m²</strong>.
         </p>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pt-2">
+        <div className="grid grid-cols-1 lg:grid-cols-12 print:block print:space-y-3 gap-6 items-start pt-2">
           <div className="lg:col-span-6">
             <table className="gov-table border border-gov-border tabular-nums">
               <thead>
@@ -343,7 +343,7 @@ export default function Step1Assessment({
             </table>
           </div>
 
-          <div className="lg:col-span-6 border border-gov-border p-4 bg-white">
+          <div className="lg:col-span-6 border border-gov-border p-4 bg-white print:p-3 print:break-inside-avoid">
             <div className="text-xs font-bold text-gov-secondary mb-2">
               Zestawienie 30-dniowego i 60-dniowego bilansu wodnego [mm]
             </div>
@@ -465,8 +465,8 @@ export default function Step1Assessment({
           )}
         </p>
 
-        <div className="border border-gov-border p-4 bg-white">
-          <div className="w-full h-64">
+        <div className="border border-gov-border p-4 bg-white print:p-3 print:break-inside-avoid">
+          <div className="w-full h-64 print:h-52">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={timeSeriesChartData}
@@ -640,7 +640,7 @@ export default function Step1Assessment({
       </div>
 
       {/* 1.3 Kondycja uprawy z satelity */}
-      <div className="space-y-3 pt-4">
+      <div className="space-y-3 pt-4 print:pt-2 print:break-inside-avoid">
         <h3 className="text-base font-bold text-gov-navy">
           1.3. Kondycja i uwodnienie roślin (dane satelitarne Sentinel-2)
         </h3>
@@ -871,7 +871,7 @@ export default function Step1Assessment({
 
       {/* 1.5 Główne przyczyny niedoboru lub nadmiaru wody */}
       {effectiveCauses.length > 0 && (
-        <div className="space-y-3 pt-4">
+        <div className="space-y-3 pt-4 print:pt-2 print:break-inside-avoid">
           <h3 className="text-base font-bold text-gov-navy">
             1.5.{" "}
             {isWaterlogged

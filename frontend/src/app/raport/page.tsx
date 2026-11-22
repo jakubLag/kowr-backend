@@ -215,7 +215,7 @@ function ReportPageContent() {
 
         {/* Dokument raportu */}
         {analysisResult && !isAnalyzing && (
-          <article className="max-w-4xl space-y-8 print:max-w-none print:space-y-6">
+          <article className="max-w-4xl space-y-8 print:max-w-none print:space-y-4">
             {/* Pasek akcji u góry (ukrywany przy druku) */}
             <div className="flex flex-wrap items-center justify-between gap-3 pb-5 border-b border-gov-border print:hidden">
               <div className="flex flex-wrap items-center gap-2.5">
@@ -295,7 +295,7 @@ function ReportPageContent() {
             </div>
 
             {/* Nagłówek urzędowy raportu */}
-            <header className="space-y-5">
+            <header className="space-y-5 print:space-y-3">
               <div className="hidden print:flex items-center justify-between pb-3 border-b-2 border-gov-navy text-xs">
                 <div>
                   Krajowy Ośrodek Wsparcia Rolnictwa —{" "}

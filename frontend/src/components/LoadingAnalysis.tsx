@@ -118,9 +118,9 @@ export default function LoadingAnalysis({
       <table className="gov-table border border-gov-border">
         <thead>
           <tr>
-            <th className="w-16">Etap</th>
+            <th className="w-24 whitespace-nowrap">Etap</th>
             <th>Wykonywana operacja</th>
-            <th className="w-36 text-right">Status</th>
+            <th className="w-32 text-right whitespace-nowrap">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -139,7 +139,7 @@ export default function LoadingAnalysis({
                       : "bg-gov-surface/40 text-gov-muted"
                 }
               >
-                <td className="font-mono font-bold tabular-nums">
+                <td className="font-mono font-bold tabular-nums whitespace-nowrap">
                   {item.step} / {LOADING_STEPS.length}
                 </td>
                 <td>

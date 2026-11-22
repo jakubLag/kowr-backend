@@ -78,7 +78,7 @@ export default function Step3Irrigation({
   );
 
   return (
-    <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:break-inside-avoid">
+    <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:pt-4 print:space-y-4">
       <div>
         <p className="text-xs font-bold text-gov-blue mb-1">
           Etap 3 z 3 — Zabieg uzupełniający i 60-dniowa prognoza potrzeb wodnych

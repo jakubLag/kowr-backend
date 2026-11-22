@@ -21,7 +21,7 @@ export default function Step2Retention({
     [diagnosis, recommendations]
   );
   return (
-    <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:break-inside-avoid">
+    <section className="pt-8 border-t-2 border-gov-navy space-y-6 print:pt-4 print:space-y-4">
       <div>
         <p className="text-xs font-bold text-gov-success mb-1">
           Etap 2 z 3 — Priorytet przed nawadnianiem
@@ -54,7 +54,10 @@ export default function Step2Retention({
             rec.ecoscheme_pln_per_ha ?? fallback?.ecoscheme_pln_per_ha;
 
           return (
-            <div key={rec.id} className="p-5 sm:p-6 space-y-4">
+            <div
+              key={rec.id}
+              className="p-5 sm:p-6 space-y-4 print:p-3.5 print:space-y-2.5 print:break-inside-avoid"
+            >
               <div className="flex flex-wrap items-baseline justify-between gap-2 pb-3 border-b border-gov-border">
                 <h3 className="text-base sm:text-lg font-bold text-gov-navy">
                   {index + 1}. {rec.title}
@@ -87,15 +90,15 @@ export default function Step2Retention({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-5 text-sm">
-                <div className="md:col-span-6 space-y-1">
+              <div className="grid grid-cols-1 md:grid-cols-12 print:grid-cols-12 gap-5 print:gap-4 text-sm">
+                <div className="md:col-span-6 print:col-span-6 space-y-1">
                   <div className="text-xs font-bold text-gov-secondary">
                     Dlaczego zalecamy na tej działce (diagnoza)
                   </div>
                   <p className="text-gov-text leading-relaxed">{rec.why}</p>
                 </div>
 
-                <div className="md:col-span-6 md:border-l md:border-gov-border md:pl-5 space-y-1">
+                <div className="md:col-span-6 print:col-span-6 md:border-l print:border-l md:border-gov-border print:border-gov-border md:pl-5 print:pl-4 space-y-1">
                   <div className="text-xs font-bold text-gov-navy">
                     Co konkretnie zrobić na polu (działanie)
                   </div>

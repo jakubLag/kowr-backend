@@ -177,7 +177,7 @@ export default function TransparencyBox({
         ];
 
   return (
-    <section className="pt-8 border-t-2 border-gov-navy space-y-5 print:break-inside-avoid">
+    <section className="pt-8 border-t-2 border-gov-navy space-y-5 print:pt-4 print:space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <p className="text-xs font-bold text-gov-secondary mb-1">
@@ -219,15 +219,15 @@ export default function TransparencyBox({
           <h3 className="text-sm font-bold text-gov-navy">
             Wykorzystane rejestry i zbiory danych
           </h3>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto print:overflow-visible">
             <table className="gov-table border border-gov-border tabular-nums text-xs">
               <thead>
                 <tr>
                   <th>Źródło danych</th>
                   <th>Tryb</th>
                   <th>Aktualność</th>
-                  <th className="hidden sm:table-cell">Rozdzielczość</th>
-                  <th className="hidden md:table-cell">Licencja</th>
+                  <th className="hidden sm:table-cell print:table-cell">Rozdzielczość</th>
+                  <th className="hidden md:table-cell print:table-cell">Licencja</th>
                 </tr>
               </thead>
               <tbody>
@@ -246,10 +246,10 @@ export default function TransparencyBox({
                       <td className="font-mono whitespace-nowrap">
                         {src.data_freshness}
                       </td>
-                      <td className="hidden sm:table-cell text-gov-secondary">
+                      <td className="hidden sm:table-cell print:table-cell text-gov-secondary">
                         {src.spatial_resolution || "—"}
                       </td>
-                      <td className="hidden md:table-cell text-gov-secondary">
+                      <td className="hidden md:table-cell print:table-cell text-gov-secondary">
                         {src.license || "—"}
                       </td>
                     </tr>
