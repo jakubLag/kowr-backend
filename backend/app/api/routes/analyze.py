@@ -81,11 +81,17 @@ async def analyze_parcel(request: AnalyzeRequest):
 
     # Bezpieczna obsługa pogody i klimatologii 10-letniej
     if isinstance(weather_data, Exception) or not weather_data:
-        limitations.append("Meteorologia (Open-Meteo): Usługa chwilowo niedostępna – użyto referencyjnego modelu agrometeorologicznego.")
+        limitations.append("Meteorologia i klimatologia 10-letnia (Open-Meteo): Usługa chwilowo niedostępna (limit zapytań / błąd sieci) – brak możliwości wyliczenia wieloletniej podatności działki.")
         weather_data = {
             "precipitation_30d_mm": 35.0, "precipitation_60d_mm": 70.0,
             "et0_30d_mm": 110.0, "et0_60d_mm": 210.0, "mean_temperature_c": 19.0,
-            "drought_frequency_10y_pct": None, "riskiest_months": [], "max_dry_spell_days": None,
+            "forecast_7d_precip_mm": 0.0, "forecast_7d_et0_mm": 25.0,
+            "wind_max_ms": 3.0,
+            "drought_years_count": None, "total_years_analyzed": None,
+            "drought_frequency_10y_pct": None, "historical_vulnerability_level": "BRAK DANYCH",
+            "peak_risk_months": [], "riskiest_months": [],
+            "max_dry_spell_days_30d": None, "avg_max_dry_spell_10y": None, "max_dry_spell_days": None,
+            "kbw_60d_10y_median_mm": None,
             "raw_daily_series": [], "is_fallback": True
         }
     elif weather_data.get("is_fallback"):
@@ -313,10 +319,17 @@ async def analyze_parcel(request: AnalyzeRequest):
         critical_threshold_kbw_60d_mm=crit_threshold_60d,
         daily_weather_series=daily_series or None,
         forecast_60d_decades=decades_list or None,
-        # Pola wieloletniej klimatologii działki (wymóg PDF pkt 3.2.1a)
+        # Pola wieloletniej analizy klimatologicznej (ostatnie 10 lat, wymóg KOWR pkt 3.2.1a i 3.3.4)
+        drought_years_count=weather_data.get("drought_years_count"),
+        total_years_analyzed=weather_data.get("total_years_analyzed"),
         drought_frequency_10y_pct=weather_data.get("drought_frequency_10y_pct"),
+        historical_vulnerability_level=weather_data.get("historical_vulnerability_level"),
+        peak_risk_months=weather_data.get("peak_risk_months"),
         riskiest_months=weather_data.get("riskiest_months"),
-        max_dry_spell_days=weather_data.get("max_dry_spell_days")
+        max_dry_spell_days_30d=weather_data.get("max_dry_spell_days_30d"),
+        avg_max_dry_spell_10y=weather_data.get("avg_max_dry_spell_10y"),
+        max_dry_spell_days=weather_data.get("max_dry_spell_days"),
+        kbw_60d_10y_median_mm=weather_data.get("kbw_60d_10y_median_mm")
     )
 
     sources = [
