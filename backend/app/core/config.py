@@ -43,7 +43,7 @@ class Settings(BaseModel):
     NO_PROXY: Optional[str] = os.getenv("NO_PROXY", "localhost,127.0.0.1")
     
     # Timeouts (sec) - strict 7s timeout per external service as per specification
-    SERVICE_TIMEOUT_SECONDS: float = float(os.getenv("SERVICE_TIMEOUT_SECONDS", "7.0"))
+    SERVICE_TIMEOUT_SECONDS: float = float(os.getenv("SERVICE_TIMEOUT_SECONDS", "8.0"))
     
     # Copernicus Data Space Ecosystem (CDSE) / Sentinel Hub
     CDSE_CLIENT_ID: Optional[str] = os.getenv("CDSE_CLIENT_ID")
