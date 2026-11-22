@@ -129,7 +129,141 @@ def test_parcel_by_point_out_of_bounds_validation():
     assert response.status_code == 422
 
 
+def test_analyze_target_date_validation_422():
+    # Nieprawidłowy format daty
+    resp_bad_fmt = client.post("/api/analyze", json={
+        "teryt": "141201_1.0001.123/4",
+        "crop": "kukurydza",
+        "target_date": "15-07-2024",
+    })
+    assert resp_bad_fmt.status_code == 422
+
+    # Data starsza niż 10 lat
+    resp_too_old = client.post("/api/analyze", json={
+        "teryt": "141201_1.0001.123/4",
+        "crop": "kukurydza",
+        "target_date": "2010-07-15",
+    })
+    assert resp_too_old.status_code == 422
+
+    # Data z przyszłości
+    resp_future = client.post("/api/analyze", json={
+        "teryt": "141201_1.0001.123/4",
+        "crop": "kukurydza",
+        "target_date": "2030-01-01",
+    })
+    assert resp_future.status_code == 422
+
+
+def test_analyze_graceful_degradation_no_false_precision():
+    from app.models.schemas import ParcelSearchResponse, ParcelGeometry, PointCoordinates
+
+    mock_parcel = ParcelSearchResponse(
+        teryt="141201_1.0001.123/4",
+        voivodeship="Mazowieckie",
+        county="Powiat miński",
+        commune="Mińsk Mazowiecki",
+        precinct="0001",
+        parcel_number="123/4",
+        area_ha=2.5,
+        center=PointCoordinates(lat=52.185, lon=21.567),
+        geometry=ParcelGeometry(
+            type="Polygon",
+            coordinates=[[[21.566, 52.184], [21.568, 52.184], [21.568, 52.186], [21.566, 52.186], [21.566, 52.184]]],
+        ),
+        is_fallback=False,
+    )
+
+    mock_weather = {
+        "precipitation_30d_mm": 20.0,
+        "precipitation_60d_mm": 45.0,
+        "et0_30d_mm": 110.0,
+        "et0_60d_mm": 210.0,
+        "forecast_7d_precip_mm": 3.0,
+        "forecast_7d_et0_mm": 25.0,
+        "forecast_60d_precip_mm": 80.0,
+        "forecast_60d_et0_mm": 180.0,
+        "mean_temperature_c": 21.0,
+        "raw_daily_series": [
+            {
+                "date": "2024-07-15",
+                "precipitation_mm": 0.0,
+                "et0_mm": 4.2,
+                "temp_max_c": 24.0,
+                "wind_max_ms": 3.0,
+                "is_forecast": False,
+            }
+        ],
+        "is_fallback": False,
+    }
+
+    mock_sentinel_unavailable = {
+        "ndvi_current": None,
+        "ndvi_historical_median": 0.82,
+        "ndvi_anomaly_percent": None,
+        "ndmi_current": None,
+        "scene_date": None,
+        "cloud_cover_percent": None,
+        "is_fallback": True,
+        "limitation_note": "Brak bezchmurnych zobrazowań Sentinel-2 (<15%).",
+    }
+
+    mock_soil_fallback = {
+        "soil_category": "lekka",
+        "awc_mm": 30.9,
+        "texture_name": "piasek gliniasty",
+        "is_fallback": True,
+    }
+
+    mock_terrain_unavailable = {
+        "slope_percent": None,
+        "aspect_direction": None,
+        "dem_source": None,
+        "dem_available": False,
+        "dem_limitation": "Dane wysokościowe DEM niedostępne.",
+        "is_slope_fallback": True,
+        "distance_to_ditch_m": None,
+        "hydro_data_available": False,
+        "hydro_limitation": "Usługa hydrograficzna Overpass API niedostępna.",
+        "nearest_waterway_coords": None,
+        "nearest_waterway_point": None,
+        "nearest_waterway_type": None,
+        "has_wetland_or_pond_nearby": None,
+        "has_windbreak_nearby": None,
+        "nearest_river": None,
+        "river_distance_m": None,
+        "water_level_cm": None,
+    }
+
+    with (
+        mock.patch("app.api.routes.analyze.fetch_parcel_from_uldk", new=mock.AsyncMock(return_value=mock_parcel)),
+        mock.patch("app.api.routes.analyze.fetch_weather_data", new=mock.AsyncMock(return_value=mock_weather)),
+        mock.patch("app.api.routes.analyze.fetch_sentinel_indices", new=mock.AsyncMock(return_value=mock_sentinel_unavailable)),
+        mock.patch("app.api.routes.analyze.fetch_soil_properties", new=mock.AsyncMock(return_value=mock_soil_fallback)),
+        mock.patch("app.api.routes.analyze.fetch_terrain_and_hydro", new=mock.AsyncMock(return_value=mock_terrain_unavailable)),
+    ):
+        response = client.post("/api/analyze", json={
+            "teryt": "141201_1.0001.123/4",
+            "crop": "kukurydza",
+            "target_date": "2024-07-15",
+        })
+
+    assert response.status_code == 200
+    data = response.json()
+    diag = data["step1_diagnosis"]
+    meta = data["metadata"]
+
+    assert diag["ndvi_current"] is None
+    assert diag["ndmi_current"] is None
+    assert diag["slope_percent"] is None
+    assert diag["distance_to_ditch_m"] is None
+    assert len(meta["limitations"]) >= 3
+    assert meta["confidence_level"].upper() == "OBNIŻONA"
+    assert meta["execution_time_ms"] < 30000
+
+
 def test_parcel_by_point_service_error():
+
     _parcel_point_cache.clear()
     mock_client_instance = mock.AsyncMock()
     mock_client_instance.get.side_effect = httpx.TimeoutException("ULDK timeout")

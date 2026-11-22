@@ -69,6 +69,13 @@ export const RETENTION_ENRICHMENT_BY_ID: Record<string, RetentionFallbackMeta> =
       "Programy małej retencji rolniczej (ARiMR / WFOŚiGW — budowa oczek wodnych i zbiorników retencyjnych)",
     ecoscheme_code: "PS WPR / NFOŚiGW",
   },
+  WATERWAY_BUFFER_STRIP: {
+    water_gain_mm: 12,
+    drought_buffer_days: 3,
+    ecoscheme_name:
+      "Norma GAEC 4 (strefy buforowe wzdłuż cieków wodnych)",
+    ecoscheme_code: "GAEC 4",
+  },
   WETLAND_POND_PROTECTION: {
     water_gain_mm: 25,
     drought_buffer_days: 7,

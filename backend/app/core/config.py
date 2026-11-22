@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
-CLOUD_COVER_MAX: int = 40
+CLOUD_COVER_MAX: int = 30
 
 
 def _load_env_file():
@@ -67,13 +67,14 @@ class Settings(BaseModel):
     OVERPASS_FALLBACK_URL: str = "https://overpass.private.coffee/api/interpreter"
 
 
-    # CORS origins (zgodne z wytycznymi bezpieczeństwa pkt 5.6)
+    # CORS origins (zgodne z wytycznymi bezpieczeństwa pkt 5.6 — wczytywane z env)
     ALLOWED_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "https://145.239.90.237.nip.io",
-        "https://kowr-front.vercel.app"
+        origin.strip()
+        for origin in os.getenv(
+            "ALLOWED_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://145.239.90.237.nip.io,https://kowr-front.vercel.app",
+        ).split(",")
+        if origin.strip()
     ]
 
 settings = Settings()

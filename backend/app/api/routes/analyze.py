@@ -24,7 +24,7 @@ from app.services.gis.satellite import fetch_sentinel_indices
 from app.services.gis.soil import fetch_soil_properties
 from app.services.gis.terrain import fetch_terrain_and_hydro
 
-from app.services.science.crops import get_crop_kc
+from app.services.science.crops import get_crop_kc, get_crop_growth_stage
 from app.services.science.fao56 import calculate_kbw, evaluate_drought_risk
 from app.services.science.decision_engine import evaluate_rules
 from app.services.science.report_generator import (
@@ -242,19 +242,6 @@ async def analyze_parcel(request: AnalyzeRequest):
     }
     crit_threshold_60d = soil_thresholds.get(soil_data["soil_category"].lower(), -170.0)
 
-    def _growth_stage_for_month(m: int) -> str:
-        if m <= 3:
-            return "Spoczynek / ruszenie wegetacji"
-        if m == 4:
-            return "Wschody i faza początkowa"
-        if m in (5, 6):
-            return "Intensywny wzrost wegetatywny"
-        if m in (7, 8):
-            return "Faza krytyczna (kwitnienie i budowa plonu)"
-        if m in (9, 10):
-            return "Dojrzewanie i zbiory"
-        return "Okres jesienno-zimowy (retencja pozimowa)"
-
     daily_series = []
     daily_kbw_values = []
     raw_series = weather_data.get("raw_daily_series", [])
@@ -302,7 +289,7 @@ async def analyze_parcel(request: AnalyzeRequest):
         except Exception:
             dec_month = month
         dec_kc = get_crop_kc(request.crop, month=dec_month)
-        dec_stage = _growth_stage_for_month(dec_month)
+        dec_stage = get_crop_growth_stage(request.crop, month=dec_month)
         dec_p = round(sum(c.precipitation_mm for c in chunk), 1)
         dec_et0 = round(sum(c.et0_mm for c in chunk), 1)
         dec_etc = round(dec_et0 * dec_kc, 1)

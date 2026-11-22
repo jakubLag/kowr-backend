@@ -17,22 +17,22 @@ EXPERT_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "badge": "Retencja krajobrazowa (Priorytet 1)",
         "why": "Działka posiada nachylenie {slope:.1f}% i znajduje się zaledwie {dist_m} m od rowu melioracyjnego. Zastawka spowolni odpływ i podniesie poziom wód gruntowych w strefie korzeniowej {crop}.",
         "action": "Zainstaluj zastawkę szandorową lub próg piętrzący na rowie przed okresem wiosennych roztopów i zamknij odpływ po osiągnięciu bezpiecznego poziomu wody.",
-        "water_gain_mm": 35.0,
-        "drought_buffer_days": 8,
-        "ecoscheme_name": "Inwestycje w gospodarstwach w zakresie małej retencji (ARiMR)",
-        "ecoscheme_code": "RET_ARIMR_01",
-        "ecoscheme_pln_per_ha": 280,
+        "water_gain_mm": 25.0,
+        "drought_buffer_days": 7,
+        "ecoscheme_name": "Inwestycje w małą retencję rolniczą / spółki wodne (PS WPR 2023–2027)",
+        "ecoscheme_code": "I.10.4",
+        "ecoscheme_pln_per_ha": None,
     },
     "SOIL_LOW_AWC_COVER_CROP": {
         "title": "Wprowadzenie międzyplonów i mulczowania",
         "badge": "Retencja glebowa (Priorytet 2)",
         "why": "Gleba w klasie '{soil_category}' posiada niską retencję użyteczną (AWC: {awc:.1f} mm). Woda szybko przesiąka poniżej warstwy korzeniowej {crop}.",
         "action": "Zastosuj siew międzyplonów ścierniskowych (np. facelia, gorczyca, rzodkiew oleista) i pozostaw mulcz na zimę. Każdy 1% materii organicznej zatrzymuje do 150 m³ wody na hektar.",
-        "water_gain_mm": 20.0,
-        "drought_buffer_days": 5,
-        "ecoscheme_name": "Rolnictwo węglowe – Międzyplony ozime / wsiewki śródplonowe",
-        "ecoscheme_code": "EK_WEG_01",
-        "ecoscheme_pln_per_ha": 520,
+        "water_gain_mm": 22.0,
+        "drought_buffer_days": 6,
+        "ecoscheme_name": "Ekoschemat: Rolnictwo węglowe — Międzyplony ozime lub wsiewki śródplonowe",
+        "ecoscheme_code": "E_MPW",
+        "ecoscheme_pln_per_ha": 435,
     },
     "NO_TILL_EVAPORATION_REDUCTION": {
         "title": "Uprawa bezorkowa lub pasowa (Strip-Till)",
@@ -40,21 +40,32 @@ EXPERT_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "why": "Deficyt parowania osiągnął KBW: {kbw_30d:.1f} mm. Tradycyjna orka odkrywkowa powoduje gwałtowną utratę nawet 15-25 mm wody w ciągu pierwszych 48 godzin od zabiegu.",
         "action": "Zastąp tradycyjną orkę płużną głęboszowaniem bezodwracającym lub technologią Strip-Till, pozostawiając resztki pożniwne na powierzchni pola.",
         "water_gain_mm": 18.0,
-        "drought_buffer_days": 4,
-        "ecoscheme_name": "Uproszczone systemy uprawy (bezorkowe / Strip-Till)",
-        "ecoscheme_code": "EK_UPR_02",
-        "ecoscheme_pln_per_ha": 300,
+        "drought_buffer_days": 5,
+        "ecoscheme_name": "Ekoschemat: Rolnictwo węglowe — Uproszczone systemy uprawy / Wymieszanie słomy z glebą",
+        "ecoscheme_code": "E_USU / E_WSG",
+        "ecoscheme_pln_per_ha": 250,
     },
     "CONTOUR_FARMING_SLOPE": {
         "title": "Uprawa w poprzek stoku i pasy zadarnione",
         "badge": "Retencja stokowa i antyerozja (Priorytet 2)",
         "why": "Nachylenie terenu {slope:.1f}% powoduje szybki spływ powierzchniowy wody opadowej, unosząc cenną próchnicę i uniemożliwiając wsiąkanie.",
         "action": "Wykonuj wszelkie zabiegi uprawowe wyłącznie prostopadle do kierunku stoku (wzdłuż warstwic) oraz utwórz pas buforowy z trwałej darni w najniższym punkcie spływu.",
-        "water_gain_mm": 15.0,
+        "water_gain_mm": 20.0,
+        "drought_buffer_days": 5,
+        "ecoscheme_name": "Norma GAEC 5 (zarządzanie uprawą ograniczające erozję) + Ekoschemat: Uproszczone systemy uprawy",
+        "ecoscheme_code": "GAEC 5 / E_USU",
+        "ecoscheme_pln_per_ha": 250,
+    },
+    "WATERWAY_BUFFER_STRIP": {
+        "title": "Utrzymanie zadarnionej strefy buforowej wzdłuż cieku lub rowu",
+        "badge": "Retencja krajobrazowa i ochrona wód (Priorytet 2)",
+        "why": "Działka graniczy z ciekiem lub rowem melioracyjnym w odległości {dist_m} m. Pas roślinności przybrzeżnej spowalnia spływ powierzchniowy, stabilizuje skarpy i ogranicza wymywanie biogenów z uprawy ({crop}).",
+        "action": "Pozostaw wzdłuż rowu lub cieku pas nieoranej, zadarnionej strefy buforowej o szerokości 3–5 m (bez stosowania nawozów i środków ochrony roślin).",
+        "water_gain_mm": 12.0,
         "drought_buffer_days": 3,
-        "ecoscheme_name": "Praktyki antyerozyjne i strefy buforowe na stokach",
-        "ecoscheme_code": "EK_STOK_03",
-        "ecoscheme_pln_per_ha": 350,
+        "ecoscheme_name": "Norma GAEC 4 (strefy buforowe wzdłuż cieków wodnych)",
+        "ecoscheme_code": "GAEC 4",
+        "ecoscheme_pln_per_ha": None,
     },
     "MICRO_RETENTION_POND": {
         "title": "Budowa niecki chłonnej lub oczka mikro-retencyjnego",
@@ -108,7 +119,7 @@ EXPERT_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "water_gain_mm": 18.0,
         "drought_buffer_days": 5,
         "ecoscheme_name": "Interwencja PS WPR: Zakładanie zadrzewień śródpolnych i systemów rolno-leśnych (ARiMR)",
-        "ecoscheme_code": "I_10_10",
+        "ecoscheme_code": "I.10.10 / I.10.11",
         "ecoscheme_pln_per_ha": 1100,
     }
 }
@@ -128,11 +139,19 @@ def generate_retention_actions(active_rules: List[Dict[str, Any]]) -> List[Reten
         if not template:
             continue
 
+        ecoscheme_name = template.get("ecoscheme_name")
+        ecoscheme_code = template.get("ecoscheme_code")
+        ecoscheme_pln_per_ha = template.get("ecoscheme_pln_per_ha")
+
         try:
             if rule_id == "RETENTION_DITCH_WEIR":
                 slope_val = params.get("slope")
                 dist_val = params.get("dist_m", 0)
                 crop_val = params.get("crop", "uprawy")
+                if str(crop_val).lower().strip() == "laka":
+                    ecoscheme_name = "Ekoschemat: Retencjonowanie wody na trwałych użytkach zielonych (TUZ)"
+                    ecoscheme_code = "E_RET"
+                    ecoscheme_pln_per_ha = 260
                 if slope_val is None:
                     why_text = (
                         f"Działka znajduje się zaledwie {dist_val} m od rowu melioracyjnego. "
@@ -140,9 +159,9 @@ def generate_retention_actions(active_rules: List[Dict[str, Any]]) -> List[Reten
                     )
                 elif slope_val < 3.0:
                     why_text = (
-                        f"Nachylenie terenu ({slope_val:.1f}%) jest na tyle małe (< 3%), że rowy nie wpływają negatywnie "
-                        f"na nawodnienie. Zastawka na rowie w odległości {dist_val} m umożliwi jednak podsiąkowe "
-                        f"zatrzymanie wody dla uprawy {crop_val}."
+                        f"Działka znajduje się zaledwie {dist_val} m od rowu melioracyjnego przy niewielkim spadku "
+                        f"terenu ({slope_val:.1f}%), co stwarza bardzo dobre warunki do piętrzenia wody zastawką "
+                        f"i zasilania podsiąkowego strefy korzeniowej uprawy {crop_val}."
                     )
                 else:
                     why_text = template["why"].format(**params)
@@ -163,9 +182,9 @@ def generate_retention_actions(active_rules: List[Dict[str, Any]]) -> List[Reten
             category=category,
             water_gain_mm=template.get("water_gain_mm"),
             drought_buffer_days=template.get("drought_buffer_days"),
-            ecoscheme_name=template.get("ecoscheme_name"),
-            ecoscheme_code=template.get("ecoscheme_code"),
-            ecoscheme_pln_per_ha=template.get("ecoscheme_pln_per_ha")
+            ecoscheme_name=ecoscheme_name,
+            ecoscheme_code=ecoscheme_code,
+            ecoscheme_pln_per_ha=ecoscheme_pln_per_ha
         ))
 
     return actions
@@ -177,11 +196,12 @@ def generate_irrigation_recommendation(
     soil_category: str,
     crop_name: str,
     forecast_7d_precip_mm: float = 0.0,
-    wind_max_ms: float = 0.0
+    wind_max_ms: float = 0.0,
+    is_archive: bool = False,
 ) -> IrrigationRecommendation:
     """
     Generuje opcjonalne, interwencyjne zalecenie nawadniania z uwzględnieniem okna pogodowego (prognoza deszczu i wiatru).
-    Zgodnie z zasadą KOWR: nawadnianie jest ostatecznością, priorytetem jest retencja.
+    Dla dat archiwalnych (`is_archive=True`) nie wykorzystuje opadów/wiatru z dni po badanej dacie.
     """
     if not irrigation_needed or deficit_mm <= 0:
         return IrrigationRecommendation(
@@ -192,12 +212,9 @@ def generate_irrigation_recommendation(
             recommended_timing="Brak wskazań",
             recommended_technique="Retencja naturalna wystarczająca",
             justification=f"Bilans wodny gleby jest stabilny lub niedobór mieści się w granicach tolerancji roślin {crop_name}.",
-            forecast_7d_precip_mm=round(forecast_7d_precip_mm, 1),
-            weather_window_status="OPTYMALNE"
+            forecast_7d_precip_mm=None if is_archive else round(forecast_7d_precip_mm, 1),
+            weather_window_status="ARCHIWALNA" if is_archive else "OPTYMALNE"
         )
-
-    # 1 mm słupa wody = 10 m³ na hektar
-    dose_m3_per_ha = round(deficit_mm * 10.0, 1)
 
     if soil_category in ["bardzo lekka", "lekka"]:
         technique = "Linie kroplujące podkorzeniowe lub mikrozraszacze niskociśnieniowe"
@@ -206,40 +223,66 @@ def generate_irrigation_recommendation(
         technique = "Deszczownia szpulowa z belką zraszającą lub rampa niskociśnieniowa"
         timing = "Późne popołudnie lub noc (po godzinie 20:00)"
 
-    # Inteligentne okno pogodowe
-    if forecast_7d_precip_mm >= 15.0:
-        status = "Zalecane wstrzymanie nawadniania – prognozowany deszcz"
-        weather_window_status = "WSTRZYMAJ_OPADY"
+    final_needed = True
+    final_dose_mm = round(deficit_mm, 1)
+
+    if is_archive:
+        status = "Zalecane interwencyjne nawodnienie ratunkowe (stan na dzień badania)"
+        weather_window_status = "ARCHIWALNA"
         justification = (
-            f"W oknie 7-dniowym prognozowane są opady deszczu w wysokości {forecast_7d_precip_mm:.1f} mm, "
-            f"które pokryją zapotrzebowanie uprawy {crop_name}. Nawadnianie przed opadem spowodowałoby niepotrzebny koszt "
-            f"oraz ryzyko wypłukania azotu i innych składników odżywczych."
+            f"Zalecana dawka interwencyjna {final_dose_mm:.1f} mm ({round(final_dose_mm * 10.0, 1):.0f} m³/ha) "
+            f"uzupełnia wyczerpaną retencję glebową (AWC: {awc_mm:.1f} mm). "
+            f"Analiza dotyczy daty historycznej — okno prognostyczne nie wpływa na rekomendację."
         )
-    elif wind_max_ms > 6.0:
+    elif forecast_7d_precip_mm >= 15.0:
+        weather_window_status = "WSTRZYMAJ_OPADY"
+        if forecast_7d_precip_mm >= deficit_mm:
+            final_needed = False
+            final_dose_mm = 0.0
+            status = "Zalecane wstrzymanie nawadniania — prognozowany deszcz pokrywa deficyt"
+            justification = (
+                f"W oknie 7-dniowym prognozowane są opady deszczu w wysokości {forecast_7d_precip_mm:.1f} mm, "
+                f"które pokrywają wyliczony deficyt ({deficit_mm:.1f} mm) dla uprawy {crop_name}. "
+                f"Wstrzymaj zabieg, aby uniknąć zbędnych kosztów i wymywania składników odżywczych."
+            )
+        else:
+            final_dose_mm = max(0.0, round(deficit_mm - forecast_7d_precip_mm * 0.7, 1))
+            status = "Zalecane wstrzymanie lub obniżenie dawki nawadniania — prognozowany deszcz"
+            justification = (
+                f"W oknie 7-dniowym prognozowane są opady {forecast_7d_precip_mm:.1f} mm. "
+                f"Zredukowano zalecaną dawkę z {deficit_mm:.1f} mm do {final_dose_mm:.1f} mm "
+                f"({round(final_dose_mm * 10.0, 1):.0f} m³/ha) — wstrzymaj zabieg do czasu weryfikacji opadu."
+            )
+    elif wind_max_ms > 5.0:
         status = "Zalecane interwencyjne nawodnienie ratunkowe (Uwaga na wiatr)"
         weather_window_status = "OSTRZEZENIE_WIATR"
-        timing = f"Wyłącznie godziny bezwietrzne (noc / wczesny poranek) – prognozowane porywy do {wind_max_ms:.1f} m/s powodują duże straty przez znoszenie kropel."
+        timing = (
+            f"Wyłącznie godziny bezwietrzne (noc / wczesny poranek) lub nawadnianie kroplowe — "
+            f"prognozowane porywy do {wind_max_ms:.1f} m/s powodują duże straty parowania i znoszenie kropel."
+        )
         justification = (
-            f"Zalecana dawka interwencyjna {deficit_mm:.1f} mm ({dose_m3_per_ha:.0f} m³/ha) "
+            f"Zalecana dawka interwencyjna {final_dose_mm:.1f} mm ({round(final_dose_mm * 10.0, 1):.0f} m³/ha) "
             f"uzupełnia wyczerpaną retencję glebową (AWC: {awc_mm:.1f} mm)."
         )
     else:
         status = "Zalecane interwencyjne nawodnienie ratunkowe"
         weather_window_status = "OPTYMALNE"
         justification = (
-            f"Zalecana dawka interwencyjna {deficit_mm:.1f} mm ({dose_m3_per_ha:.0f} m³/ha) "
+            f"Zalecana dawka interwencyjna {final_dose_mm:.1f} mm ({round(final_dose_mm * 10.0, 1):.0f} m³/ha) "
             f"uzupełnia wyczerpaną retencję glebową (AWC: {awc_mm:.1f} mm) bez ryzyka przesiąkania w głąb profilu."
         )
 
+    dose_m3_per_ha = round(final_dose_mm * 10.0, 1)
+
     return IrrigationRecommendation(
-        needed=True,
+        needed=final_needed,
         status=status,
-        dose_mm=deficit_mm,
+        dose_mm=final_dose_mm,
         dose_m3_per_ha=dose_m3_per_ha,
-        recommended_timing=timing,
+        recommended_timing=timing if final_needed else "Wstrzymaj do weryfikacji prognozowanego opadu",
         recommended_technique=technique,
         justification=justification,
-        forecast_7d_precip_mm=round(forecast_7d_precip_mm, 1),
+        forecast_7d_precip_mm=None if is_archive else round(forecast_7d_precip_mm, 1),
         weather_window_status=weather_window_status
     )
 

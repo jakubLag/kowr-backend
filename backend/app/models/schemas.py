@@ -1,5 +1,6 @@
+from datetime import date, timedelta
 from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # ----------------- PARCEL SCHEMAS -----------------
 
@@ -29,8 +30,27 @@ class ParcelSearchResponse(BaseModel):
 class AnalyzeRequest(BaseModel):
     teryt: str = Field(..., description="Format TERYT: WWPPGG_R.OOOO.NR_DZIAŁKI", json_schema_extra={"example": "141201_1.0001.123/4"})
     crop: str = Field(default="kukurydza", description="Gatunek uprawy (np. kukurydza, pszenica_ozima, rzepak)")
-    target_date: Optional[str] = Field(default=None, description="Data analizy w formacie YYYY-MM-DD (domyślnie bieżąca data)")
+    target_date: Optional[str] = Field(default=None, description="Data analizy w formacie YYYY-MM-DD (zakres: ostatnie 10 lat do dzisiaj)")
     ditch_distance_m: Optional[float] = Field(default=None, description="Opcjonalna odległość do rowu melioracyjnego w metrach (np. podana z mapy Geoportalu)")
+
+    @field_validator("target_date")
+    @classmethod
+    def validate_target_date(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        cleaned = value.strip()
+        try:
+            parsed = date.fromisoformat(cleaned)
+        except ValueError as exc:
+            raise ValueError("Nieprawidłowy format daty target_date. Wymagany format: RRRR-MM-DD.") from exc
+
+        today = date.today()
+        min_date = today - timedelta(days=3653)  # ~10 lat wstecz (z uwzględnieniem lat przestępnych)
+        if parsed > today:
+            raise ValueError(f"Data analizy ({cleaned}) nie może być w przyszłości (maksymalnie {today.isoformat()}).")
+        if parsed < min_date:
+            raise ValueError(f"Data analizy ({cleaned}) wykracza poza zakres ostatnich 10 lat (minimalnie {min_date.isoformat()}).")
+        return cleaned
 
 class DailyWeatherPoint(BaseModel):
     date: str = Field(..., description="Data w formacie YYYY-MM-DD")

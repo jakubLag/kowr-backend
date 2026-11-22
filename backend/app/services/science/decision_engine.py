@@ -5,6 +5,8 @@ Identyfikuje warunki na działce i aktywuje dedykowane reguły retencyjne oraz d
 """
 
 from typing import List, Dict, Any, Optional
+from app.services.science.crops import CROP_DATABASE, _normalize_crop_key
+
 
 def evaluate_rules(
     kbw_30d: float,
@@ -18,6 +20,7 @@ def evaluate_rules(
     area_ha: float,
     has_wetland_or_pond_nearby: Optional[bool] = None,
     has_windbreak_nearby: Optional[bool] = None,
+    awc_root_zone_mm: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Analizuje parametry biofizyczne i przestrzenne działki.
@@ -29,6 +32,13 @@ def evaluate_rules(
     """
     primary_causes = []
     active_rules = []
+
+    crop_key = _normalize_crop_key(crop_name)
+    crop_info = CROP_DATABASE.get(crop_key, CROP_DATABASE["kukurydza"])
+    crop_sensitivity = crop_info.get("drought_sensitivity", "ŚREDNIA").upper()
+    crop_root_depth_m = float(crop_info.get("root_depth_m", 0.9))
+    crop_name_pl = crop_info.get("name_pl", crop_name)
+    crop_critical_phase = crop_info.get("critical_phase", "")
 
     is_waterlogged = kbw_30d > max(35.0, awc_mm * 0.85) or kbw_60d > max(60.0, awc_mm * 1.4)
 
@@ -49,11 +59,14 @@ def evaluate_rules(
         elif awc_mm < 50:
             primary_causes.append(f"Ograniczona pojemność wodna gleby lekkiej (AWC: {awc_mm:.1f} mm) sprzyja szybkiemu przesychaniu wierzchniej warstwy.")
 
-    if slope_percent is not None:
-        if slope_percent >= 3.0:
-            primary_causes.append(f"Spadek terenu {slope_percent:.1f}% powoduje intensywny spływ powierzchniowy wody przed jej wsiąknięciem w profil glebowy.")
-        else:
-            primary_causes.append(f"Płaskie ukształtowanie terenu (spadek {slope_percent:.1f}%) ogranicza grawitacyjny spływ powierzchniowy i sprzyja retencji krajobrazowej.")
+        if kbw_30d < -35 and ("WYSOKA" in crop_sensitivity or crop_root_depth_m <= 0.6):
+            primary_causes.append(
+                f"Uprawa ({crop_name_pl}) charakteryzuje się {crop_sensitivity.lower()} wrażliwością na suszę "
+                f"oraz strefą korzeniową {crop_root_depth_m:.1f} m (faza krytyczna: {crop_critical_phase})."
+            )
+
+    if slope_percent is not None and slope_percent >= 3.0:
+        primary_causes.append(f"Spadek terenu {slope_percent:.1f}% powoduje intensywny spływ powierzchniowy wody przed jej wsiąknięciem w profil glebowy.")
 
     if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
         if is_waterlogged:
@@ -141,6 +154,18 @@ def evaluate_rules(
             }
         })
 
+    # Reguła D2: Strefa buforowa wzdłuż cieku / rowu melioracyjnego (odległość <= 150 m)
+    if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
+        active_rules.append({
+            "rule_id": "WATERWAY_BUFFER_STRIP",
+            "priority": 2,
+            "category": "landscape",
+            "params": {
+                "dist_m": round(distance_to_ditch_m),
+                "crop": crop_name
+            }
+        })
+
     # Reguła E: Ochrona i strefa buforowa przy oczkach wodnych / mokradłach (bufor 500 m)
     if has_wetland_or_pond_nearby is True:
         active_rules.append({
@@ -179,15 +204,22 @@ def evaluate_rules(
     # Sortowanie reguł wg priorytetu
     active_rules.sort(key=lambda r: r["priority"])
 
-    # 3. Ocena potrzeby nawadniania interwencyjnego
-    # Obliczamy deficyt wilgotności w profilu
+    # 3. Ocena potrzeby nawadniania interwencyjnego (z uwzględnieniem wrażliwości uprawy i korzenienia)
+    if crop_sensitivity == "BARDZO WYSOKA" or crop_root_depth_m <= 0.6:
+        irrigation_trigger_kbw_30d = -40.0
+    elif crop_sensitivity == "NISKA":
+        irrigation_trigger_kbw_30d = -65.0
+    else:
+        irrigation_trigger_kbw_30d = -50.0
+
     deficit_mm = 0.0
     irrigation_needed = False
-    if kbw_30d < -50:
-        # Brakuje wody w stosunku do optymalnego bilansu
+    if not is_waterlogged and kbw_30d < irrigation_trigger_kbw_30d:
         deficit_mm = abs(kbw_30d) * 0.5
-        # Dawka nie powinna przekraczać pojemności gleby AWC
-        max_single_dose = min(35.0, max(15.0, awc_mm * 0.7))
+        effective_awc = awc_root_zone_mm if (awc_root_zone_mm is not None and awc_root_zone_mm > 0) else awc_mm
+        max_single_dose = min(35.0, max(15.0, awc_mm * 0.75))
+        if effective_awc > 0:
+            max_single_dose = min(max_single_dose, max(15.0, effective_awc * 0.5))
         deficit_mm = round(min(deficit_mm, max_single_dose), 1)
         irrigation_needed = True
 
