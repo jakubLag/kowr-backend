@@ -34,12 +34,12 @@ async def fetch_elevation_point(client: httpx.AsyncClient, northing: float, east
     """Pobiera wysokość n.p.m. dla punktu z Numerycznego Modelu Terenu (GUGiK NMT)."""
     url = f"{settings.GUGIK_NMT_URL}?request=GetHbyXY&x={round(northing, 1)}&y={round(easting, 1)}"
     try:
-        resp = await client.get(url, timeout=2.5)
+        resp = await client.get(url, timeout=2.0, follow_redirects=True)
         if resp.status_code == 200:
-            text = resp.text.strip()
+            text = resp.text.strip().split("\n")[0].strip()
             return float(text)
     except Exception as e:
-        logger.warning(f"[GUGiK NMT] Błąd zapytania o punkt wysokości: {e}")
+        logger.debug(f"[GUGiK NMT] Usługa NMT niedostępna ({type(e).__name__}): {e}")
     return None
 
 
@@ -74,9 +74,15 @@ async def fetch_elevation_open_meteo(client: httpx.AsyncClient, lat: float, lon:
 
 async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: float) -> Tuple[float, bool]:
     """
-    Oblicza rzeczywiste nachylenie stoku (%) z NMT GUGiK lub zapasowo Open-Meteo Elevation.
+    Oblicza rzeczywiste nachylenie stoku (%) z Open-Meteo Elevation API lub zapasowo NMT GUGiK.
     Zwraca krotkę (slope_percent, is_fallback).
     """
+    # 1. Próba pobrania z szybkiego i stabilnego Open-Meteo Elevation API (<200 ms)
+    elevation_slope = await fetch_elevation_open_meteo(client, lat, lon)
+    if elevation_slope is not None:
+        return elevation_slope, False
+
+    # 2. Próba zapasowa z państwowego serwisu NMT GUGiK (EPSG:2180)
     northing, easting = transform_4326_to_2180(lon, lat)
 
     h_center_task = fetch_elevation_point(client, northing, easting)
@@ -97,12 +103,7 @@ async def calculate_slope_from_nmt(client: httpx.AsyncClient, lat: float, lon: f
     except Exception as e:
         logger.debug(f"[GUGiK NMT] Błąd zapytania NMT: {e}")
 
-    # Próba pobrania z Open-Meteo Elevation API
-    elevation_slope = await fetch_elevation_open_meteo(client, lat, lon)
-    if elevation_slope is not None:
-        return elevation_slope, False
-
-    print("[GUGiK NMT] Brak odpowiedzi z NMT i Elevation API - zastosowano spadek domyślny 1.8% (fallback)")
+    logger.info("[GUGiK NMT] Brak odpowiedzi z NMT i Elevation API - zastosowano spadek referencyjny 1.8%")
     return 1.8, True
 
 
