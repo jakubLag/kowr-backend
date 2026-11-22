@@ -205,29 +205,38 @@ async def fetch_parcel_from_uldk(teryt: str) -> ParcelSearchResponse:
     area_ha = 2.5
     is_fallback = False
 
-    try:
-        async with httpx.AsyncClient(timeout=settings.SERVICE_TIMEOUT_SECONDS, follow_redirects=True) as client:
-            resp = await client.get(settings.ULDK_BASE_URL, params=params)
-            # Ochrona przed tarpitem GUGiK (150 MB) i blokadą IP:
-            if resp.status_code == 200 and len(resp.content) < 50_000:
-                raw = resp.text.strip()
-                if raw.startswith("0") and "POINT(90 90)" not in raw and "blocked for abuse" not in raw:
-                    wkt_str = extract_wkt_from_response(raw)
+    for attempt in range(2):
+        try:
+            timeout_sec = 3.5 if attempt == 0 else 4.0
+            async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True) as client:
+                resp = await client.get(settings.ULDK_BASE_URL, params=params)
+                # Ochrona przed tarpitem GUGiK (150 MB) i blokadą IP:
+                if resp.status_code == 200 and len(resp.content) < 50_000:
+                    raw = resp.text.strip()
+                    if raw.startswith("0") and "POINT(90 90)" not in raw and "blocked for abuse" not in raw:
+                        wkt_str = extract_wkt_from_response(raw)
+                        if wkt_str:
+                            break
 
-            if not wkt_str:
-                resp2 = await client.get(settings.ULDK_BASE_URL, params={
-                    "request": "GetParcelByIdOrNr",
-                    "id": teryt,
-                    "result": "geom_wkt"
-                })
-                if resp2.status_code == 200 and len(resp2.content) < 50_000:
-                    raw2 = resp2.text.strip()
-                    if raw2.startswith("0") and "POINT(90 90)" not in raw2 and "blocked for abuse" not in raw2:
-                        wkt_str = extract_wkt_from_response(raw2)
-    except Exception as e:
-        print(f"[ULDK GUGiK] Błąd połączenia / timeout: {e}")
-        logger.warning(f"[ULDK GUGiK] Błąd połączenia: {e}")
-        wkt_str = None
+                if not wkt_str:
+                    resp2 = await client.get(settings.ULDK_BASE_URL, params={
+                        "request": "GetParcelByIdOrNr",
+                        "id": teryt,
+                        "result": "geom_wkt"
+                    })
+                    if resp2.status_code == 200 and len(resp2.content) < 50_000:
+                        raw2 = resp2.text.strip()
+                        if raw2.startswith("0") and "POINT(90 90)" not in raw2 and "blocked for abuse" not in raw2:
+                            wkt_str = extract_wkt_from_response(raw2)
+                            if wkt_str:
+                                break
+        except Exception as e:
+            if attempt == 0:
+                logger.debug(f"[ULDK GUGiK] Próba 1 timeout ({e}), automatyczne ponowienie z rotującym IP...")
+                continue
+            print(f"[ULDK GUGiK] Błąd połączenia / timeout: {e}")
+            logger.warning(f"[ULDK GUGiK] Błąd połączenia: {e}")
+            wkt_str = None
 
     if wkt_str:
         try:

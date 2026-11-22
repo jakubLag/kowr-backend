@@ -11,11 +11,13 @@ def evaluate_rules(
     kbw_60d: float,
     awc_mm: float,
     soil_category: str,
-    slope_percent: float,
+    slope_percent: Optional[float],
     distance_to_ditch_m: Optional[float],
     ndvi_anomaly_percent: Optional[float],
     crop_name: str,
-    area_ha: float
+    area_ha: float,
+    has_wetland_or_pond_nearby: Optional[bool] = None,
+    has_windbreak_nearby: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Analizuje parametry biofizyczne i przestrzenne działki.
@@ -47,10 +49,11 @@ def evaluate_rules(
         elif awc_mm < 50:
             primary_causes.append(f"Ograniczona pojemność wodna gleby lekkiej (AWC: {awc_mm:.1f} mm) sprzyja szybkiemu przesychaniu wierzchniej warstwy.")
 
-    if slope_percent >= 3.0:
-        primary_causes.append(f"Spadek terenu {slope_percent:.1f}% powoduje intensywny spływ powierzchniowy wody przed jej wsiąknięciem w profil glebowy.")
-    else:
-        primary_causes.append(f"Nachylenie terenu ({slope_percent:.1f}%) jest na tyle małe, że rowy nie wpływają na nawodnienie.")
+    if slope_percent is not None:
+        if slope_percent >= 3.0:
+            primary_causes.append(f"Spadek terenu {slope_percent:.1f}% powoduje intensywny spływ powierzchniowy wody przed jej wsiąknięciem w profil glebowy.")
+        else:
+            primary_causes.append(f"Płaskie ukształtowanie terenu (spadek {slope_percent:.1f}%) ogranicza grawitacyjny spływ powierzchniowy i sprzyja retencji krajobrazowej.")
 
     if distance_to_ditch_m is not None and distance_to_ditch_m <= 150:
         if is_waterlogged:
@@ -126,8 +129,8 @@ def evaluate_rules(
             }
         })
 
-    # Reguła D: Uprawa w poprzek stoku / pasy antyerozyjne (Spadek > 3%)
-    if slope_percent >= 3.0:
+    # Reguła D: Uprawa w poprzek stoku / pasy antyerozyjne (Spadek >= 3%)
+    if slope_percent is not None and slope_percent >= 3.0:
         active_rules.append({
             "rule_id": "CONTOUR_FARMING_SLOPE",
             "priority": 2,
@@ -138,7 +141,30 @@ def evaluate_rules(
             }
         })
 
-    # Reguła E: Mikro-zbiornik retencyjny / niecka chłonna (Działki > 1 ha przy deficycie)
+    # Reguła E: Ochrona i strefa buforowa przy oczkach wodnych / mokradłach (bufor 500 m)
+    if has_wetland_or_pond_nearby is True:
+        active_rules.append({
+            "rule_id": "WETLAND_POND_PROTECTION",
+            "priority": 2,
+            "category": "landscape",
+            "params": {
+                "crop": crop_name
+            }
+        })
+
+    # Reguła F: Zadrzewienia śródpolne i pasy wiatrochronne (brak zadrzewień w 300 m przy deficycie)
+    if has_windbreak_nearby is False and not is_waterlogged and (kbw_30d < -30 or kbw_60d < -60):
+        active_rules.append({
+            "rule_id": "WINDBREAK_SHELTERBELT",
+            "priority": 3,
+            "category": "landscape",
+            "params": {
+                "kbw_30d": kbw_30d,
+                "crop": crop_name
+            }
+        })
+
+    # Reguła G: Mikro-zbiornik retencyjny / niecka chłonna (Działki > 1 ha przy deficycie)
     if area_ha >= 1.0 and (kbw_60d < -80 or (distance_to_ditch_m is not None and distance_to_ditch_m > 300)):
         active_rules.append({
             "rule_id": "MICRO_RETENTION_POND",

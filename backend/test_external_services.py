@@ -20,7 +20,7 @@ async def test_all_services_individually():
 
     # Działka testowa (Mińsk Mazowiecki)
     teryt = "101502_2.0001.1098"
-    lat, lon = 51.80788, 19.995813
+    lat, lon = 52.101282, 19.727814
 
     # -------------------------------------------------------------
     # 1. ULDK GUGiK (Granice i powierzchnia działki)

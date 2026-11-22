@@ -56,6 +56,15 @@ class DecadeForecastPoint(BaseModel):
     kbw_60d_rolling_mm: float = Field(..., description="Prognozowany 60-dniowy bilans kroczący KBW na koniec dekady (mm)")
     risk_status: str = Field(..., description="Ocena ryzyka i rekomendacja na dekadę")
 
+class ClimateVulnerability10Y(BaseModel):
+    drought_frequency_years: str = Field(..., description="Częstość występowania suszy rolniczej, np. '7 na 10 lat'")
+    drought_frequency_percent: int = Field(..., description="Procent lat z suszą w ostatnim 10-leciu (np. 70%)")
+    most_critical_month: str = Field(..., description="Miesiąc o największym statystycznym deficycie wody (np. 'Lipiec')")
+    average_summer_kbw_mm: float = Field(..., description="Średni Klimatyczny Bilans Wodny sezonu letniego (maj-sierpień) w 10-leciu")
+    max_dry_spell_days: int = Field(..., description="Najdłuższy ciąg dni bezopadowych (<1mm) w historii wieloletniej")
+    vulnerability_class: str = Field(..., description="Klasa podatności: BARDZO WYSOKA | WYSOKA | UMIARKOWANA | NISKA")
+    summary_text: str = Field(..., description="Syntetyczny wniosek dla rolnika")
+
 class Diagnosis(BaseModel):
     kbw_30d_mm: float = Field(..., description="Klimatyczny Bilans Wodny za ostatnie 30 dni (mm)")
     kbw_60d_mm: float = Field(..., description="Klimatyczny Bilans Wodny za ostatnie 60 dni (mm)")
@@ -65,11 +74,20 @@ class Diagnosis(BaseModel):
     soil_category: str = Field(..., description="Kategoria agronomiczna gleby (bardzo lekka, lekka, średnia, ciężka)")
     soil_texture: str = Field(..., description="Uziarnienie gleby wg USDA / PTG (np. piasek gliniasty, glina lekka)")
     ndvi_current: Optional[float] = Field(None, description="Aktualny wskaźnik NDVI z satelity Sentinel-2")
-    ndvi_historical_median: Optional[float] = Field(None, description="Mediana wieloletnia NDVI dla tego okresu")
+    ndvi_historical_median: Optional[float] = Field(None, description="Wzorzec referencyjny NDVI dla uprawy i fazy fenologicznej (Copernicus/IUNG-PIB)")
     ndvi_anomaly_percent: Optional[float] = Field(None, description="Odchylenie NDVI od normy (%)")
     ndmi_current: Optional[float] = Field(None, description="Wskaźnik uwilgotnienia NDMI")
-    slope_percent: Optional[float] = Field(None, description="Średni spadek terenu działki (%)")
+    slope_percent: Optional[float] = Field(None, description="Średni spadek terenu działki (%) z modelu DEM; None przy niedostępności DEM")
+    aspect_direction: Optional[str] = Field(None, description="Główny kierunek spływu powierzchniowego (np. południowo-zachodni)")
     distance_to_ditch_m: Optional[float] = Field(None, description="Odległość do najbliższego rowu/cieku w buforze 500m (m)")
+    nearest_river: Optional[str] = Field(None, description="Nazwa najbliższej rzeki (stacja IMGW-PIB)")
+    river_distance_m: Optional[float] = Field(None, description="Odległość do najbliższej rzeki/stacji wodowskazowej (m)")
+    water_level_cm: Optional[float] = Field(None, description="Aktualny stan wody na rzece wg IMGW (cm)")
+    nearest_waterway_coords: Optional[List[List[float]]] = Field(None, description="Współrzędne [lat, lon] linii najbliższego cieku/rowu (Overpass OSM)")
+    nearest_waterway_point: Optional[List[float]] = Field(None, description="Współrzędne [lat, lon] najbliższego punktu cieku (proponowane miejsce zastawki)")
+    nearest_waterway_type: Optional[str] = Field(None, description="Typ najbliższego cieku (ditch, drain, stream, canal, river)")
+    has_wetland_or_pond_nearby: Optional[bool] = Field(None, description="Czy w promieniu 500 m wykryto oczko wodne, zbiornik lub mokradło")
+    has_windbreak_nearby: Optional[bool] = Field(None, description="Czy w promieniu 300 m wykryto zadrzewienia śródpolne lub żywopłoty")
     primary_causes: List[str] = Field(..., description="Główne przyczyny deficytu wody zidentyfikowane na działce")
     precipitation_30d_mm: Optional[float] = Field(None, description="Suma opadów z ostatnich 30 dni (mm)")
     et0_30d_mm: Optional[float] = Field(None, description="Suma ET0 z ostatnich 30 dni (mm)")
@@ -92,6 +110,8 @@ class Diagnosis(BaseModel):
     avg_max_dry_spell_10y: Optional[float] = Field(None, description="Średni najdłuższy okres bezopadowy z 10 lat")
     max_dry_spell_days: Optional[int] = Field(None, description="Najdłuższy okres bez opadów w 10-leciu (dni)")
     kbw_60d_10y_median_mm: Optional[float] = Field(None, description="10-letnia mediana KBW dla tego samego 60-dniowego okna roku")
+    historical_vulnerability: Optional[ClimateVulnerability10Y] = Field(default=None, description="10-letnia analiza podatności historycznej działki na suszę")
+    climatology_10y: Optional[Dict[str, Any]] = Field(default=None, description="Szczegółowe dane 10-letniej klimatologii dla frontendu")
 
 class RetentionAction(BaseModel):
     id: str = Field(..., description="Unikalny identyfikator reguły")
@@ -101,6 +121,11 @@ class RetentionAction(BaseModel):
     action: str = Field(..., description="Konkretne działanie agrotechniczne lub inwestycyjne dla rolnika")
     priority: int = Field(..., description="Waga priorytetu (1 = najwyższy)")
     category: str = Field(..., description="Kategoria: landscape | soil | micro_storage")
+    water_gain_mm: Optional[float] = Field(None, description="Szacowany zysk retencyjny wody w glebie (mm)")
+    drought_buffer_days: Optional[int] = Field(None, description="Liczba dodatkowych dni odporności na brak opadów")
+    ecoscheme_name: Optional[str] = Field(None, description="Nazwa ekoschematu lub programu dopłat ARiMR/WPR")
+    ecoscheme_code: Optional[str] = Field(None, description="Kod praktyki ekoschematu")
+    ecoscheme_pln_per_ha: Optional[int] = Field(None, description="Szacowana stawka dopłaty w PLN/ha")
 
 class IrrigationRecommendation(BaseModel):
     needed: bool = Field(..., description="Czy nawadnianie interwencyjne jest wymagane")
@@ -110,14 +135,21 @@ class IrrigationRecommendation(BaseModel):
     recommended_timing: str = Field(..., description="Sugerowana pora / okno zabiegu")
     recommended_technique: str = Field(..., description="Rekomendowana technika (kropelkowe, deszczownia niskociśnieniowa)")
     justification: str = Field(..., description="Uzasadnienie dawki w oparciu o AWC i KBW")
+    forecast_7d_precip_mm: Optional[float] = Field(None, description="Prognozowana suma opadów w oknie 7-dniowym (mm)")
+    weather_window_status: Optional[str] = Field(None, description="Status okna pogodowego: OPTYMALNE | WSTRZYMAJ_OPADY | OSTRZEZENIE_WIATR")
 
 class ReportMetadata(BaseModel):
     sources: List[str] = Field(..., description="Jawny wykaz źródeł danych przestrzennych i meteo")
     analysis_date: str = Field(..., description="Data wygenerowania analizy")
+    target_date: Optional[str] = Field(None, description="Data analizowanego stanu pola")
+    target_analysis_date: Optional[str] = Field(None, description="Alias daty analizy dla kompatybilności wstecznej")
     sentinel_scene_date: Optional[str] = Field(None, description="Data zobrazowania Sentinel-2")
     cloud_cover_percent: Optional[float] = Field(None, description="Stopień zachmurzenia sceny")
     limitations: List[str] = Field(default_factory=list, description="Lista ograniczeń i zastrzeżeń metodycznych")
     execution_time_ms: int = Field(..., description="Czas wykonania obliczeń na backendzie w ms")
+    data_freshness: Optional[Dict[str, str]] = Field(default=None, description="Data aktualności i stan każdego źródła danych")
+    confidence_level: Optional[str] = Field(default="Wysoka", description="Wskaźnik wiarygodności danych: Wysoka | Średnia | Obniżona")
+    confidence_score: Optional[int] = Field(default=95, description="Punktowa ocena wiarygodności (0-100%)")
 
 class AnalysisResponse(BaseModel):
     teryt: str = Field(..., description="Identyfikator TERYT")
