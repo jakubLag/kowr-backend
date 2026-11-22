@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
-CLOUD_COVER_MAX: int = 40
+CLOUD_COVER_MAX: int = 30
 
 
 def _load_env_file():
